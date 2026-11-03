@@ -14,6 +14,9 @@ const panesEl = $('panes');
 const emptyEl = $('empty');
 const connEl = $('conn');
 
+// The ?key= sign-in link must not stay in the address bar or the history entry.
+if (location.search) history.replaceState(null, '', location.pathname + location.hash);
+
 let sessions = [];
 let selectedId = location.hash.slice(1) || null;
 let previousStatus = null;

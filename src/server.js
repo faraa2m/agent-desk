@@ -25,6 +25,16 @@ const CONTENT_TYPES = {
 };
 const BODY_MAX = 1024 * 1024;
 const COOKIE = 'ad_key';
+const COOKIE_MAX_AGE = 400 * 24 * 60 * 60;
+const SIGN_IN_PAGE = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>agent-desk</title></head>
+<body>
+<h1>agent-desk</h1>
+<p>This browser is not signed in. Run <code>agent-desk</code> in a terminal to open it.</p>
+</body>
+</html>
+`;
 const ERROR_STATUS = {
   BAD_NAME: 400,
   NO_DIR: 400,
@@ -66,6 +76,15 @@ function sendJson(res, status, value) {
   const body = JSON.stringify(value);
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
   res.end(body);
+}
+
+function sendHtml(res, status, html) {
+  res.writeHead(status, {
+    'content-type': 'text/html; charset=utf-8',
+    'content-length': Buffer.byteLength(html),
+    'cache-control': 'no-store',
+  });
+  res.end(html);
 }
 
 function sendFile(res, file) {
@@ -207,9 +226,18 @@ export function createServer({ manager, poller, token, port = PORT }) {
     }
 
     const auth = authenticate(req, url);
-    if (!auth) throw new HttpError(401, 'Unauthorized');
+    if (!auth) {
+      if (req.method === 'GET' && path === '/') return sendHtml(res, 401, SIGN_IN_PAGE);
+      throw new HttpError(401, 'Unauthorized');
+    }
     if (auth === 'query') {
-      res.setHeader('set-cookie', `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/`);
+      res.setHeader('set-cookie', `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${COOKIE_MAX_AGE}`);
+      // Redirect so the token leaves the address bar and the history entry.
+      if (req.method === 'GET' && path === '/') {
+        res.writeHead(303, { location: '/', 'cache-control': 'no-store', 'content-length': 0 });
+        res.end();
+        return;
+      }
     }
 
     if (req.method === 'GET') {

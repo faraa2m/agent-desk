@@ -114,6 +114,35 @@ test('?key= authenticates and sets the cookie; the cookie and bearer token work'
   assert.equal((await request('/api/sessions', { headers: auth })).status, 200);
 });
 
+test('GET /?key= sets a long-lived cookie and redirects to / without the key', async () => {
+  const res = await request(`/?key=${TOKEN}`);
+  assert.equal(res.status, 303);
+  assert.equal(res.headers.location, '/');
+  assert.equal(res.headers['cache-control'], 'no-store');
+  const cookie = res.headers['set-cookie'][0];
+  assert.match(cookie, new RegExp(`^ad_key=${TOKEN};`));
+  assert.match(cookie, /HttpOnly/);
+  assert.match(cookie, /Max-Age=34560000/);
+  assert.equal(res.text, '');
+  const page = await request('/', { headers: { cookie: `ad_key=${TOKEN}` } });
+  assert.equal(page.status, 200);
+  assert.match(page.headers['content-type'], /text\/html/);
+});
+
+test('GET / without a token is a 401 HTML page with no token or session data; the API stays JSON', async () => {
+  const res = await request('/', { headers: { cookie: 'ad_key=nope' } });
+  assert.equal(res.status, 401);
+  assert.match(res.headers['content-type'], /^text\/html/);
+  assert.equal(res.headers['cache-control'], 'no-store');
+  assert.match(res.text, /Run <code>agent-desk<\/code> in a terminal/);
+  assert.ok(!res.text.includes(TOKEN));
+  assert.ok(!res.text.includes('view-1'));
+  assert.equal(res.headers['set-cookie'], undefined);
+  const api = await request('/api/sessions');
+  assert.equal(api.status, 401);
+  assert.deepEqual(api.json, { error: 'Unauthorized' });
+});
+
 test('a foreign Host or Origin is 403 even with a valid token', async () => {
   const res = await request('/api/sessions', { headers: { ...auth, host: `evil.example:${port}` } });
   assert.equal(res.status, 403);

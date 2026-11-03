@@ -151,7 +151,7 @@ export function createServer({ manager, poller, token, port = PORT }) {
         if (!res.headersSent) sendJson(res, err.status, { error: err.message });
         return;
       }
-      console.error(`server: ${req.method} ${req.url}: ${err.stack ?? err}`);
+      console.error(`server: ${req.method} ${parseUrl(req)?.pathname ?? '-'}: ${err.stack ?? err}`);
       if (!res.headersSent) sendJson(res, 500, { error: 'Internal error' });
       else res.destroy();
     });

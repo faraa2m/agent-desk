@@ -18,6 +18,7 @@ let fake;
 let dir;
 let snapshotSubs;
 let snapshot;
+let snapshotFails = false;
 const sockets = [];
 
 before(async () => {
@@ -27,7 +28,7 @@ before(async () => {
   snapshotSubs = new Set();
   snapshot = [{ id: 'view-1', name: 'v' }];
   const poller = {
-    current: () => snapshot,
+    current: () => { if (snapshotFails) throw new Error('boom'); return snapshot; },
     subscribe: (cb) => { snapshotSubs.add(cb); return () => snapshotSubs.delete(cb); },
   };
   server = createServer({ manager, poller, token: TOKEN, port: 0 });
@@ -225,4 +226,19 @@ test('two terminal clients share a session; input and resize reach the pty; one 
   assert.equal((await request(`/api/sessions/${id}/dismiss`, { method: 'POST', headers: auth })).status, 200);
   assert.equal(manager.get(id), null);
   b.close();
+});
+
+test('a 500 error log carries the path but never the token from the query string', async (t) => {
+  const logged = [];
+  t.mock.method(console, 'error', (...a) => { logged.push(a.join(' ')); });
+  snapshotFails = true;
+  try {
+    const res = await request(`/api/sessions?key=${TOKEN}`);
+    assert.equal(res.status, 500);
+  } finally {
+    snapshotFails = false;
+  }
+  const text = logged.join('\n');
+  assert.match(text, /GET \/api\/sessions/);
+  assert.ok(!text.includes(TOKEN));
 });

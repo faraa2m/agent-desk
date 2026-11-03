@@ -22,6 +22,16 @@ const TERMINAL_REPORTS = new RegExp(
   ].join('|'),
   'g',
 );
+// SGR mouse reports; bit 32 of the button code marks motion, bit 64 the wheel.
+const SGR_MOUSE = /\x1b\[<(\d+);\d+;\d+[Mm]/g;
+const MOUSE_MOTION_OR_WHEEL = 32 | 64;
+
+function isUserInput(data) {
+  const rest = String(data)
+    .replace(TERMINAL_REPORTS, '')
+    .replace(SGR_MOUSE, (report, button) => (Number(button) & MOUSE_MOTION_OR_WHEEL ? '' : report));
+  return rest !== '';
+}
 
 function fail(code, message) {
   return Object.assign(new Error(message), { code });
@@ -223,9 +233,9 @@ export class SessionManager extends EventEmitter {
   write(id, data) {
     const entry = this.#live.get(id);
     if (!entry) return;
-    // Opening or focusing a session's terminal makes it send reports; those
-    // alone do not answer a prompt.
-    if (String(data).replace(TERMINAL_REPORTS, '') !== '') entry.watcher.userInput();
+    // Opening, focusing or hovering over a session's terminal makes it send
+    // reports; those alone do not answer a prompt.
+    if (isUserInput(data)) entry.watcher.userInput();
     entry.pty.write(data);
   }
 

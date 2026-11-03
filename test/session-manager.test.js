@@ -114,6 +114,19 @@ test('replies xterm.js sends to terminal queries keep the session waiting', () =
   assert.equal(mgr.live(id).screenWaiting, false);
 });
 
+// Claude Code turns on any-motion mouse tracking, so moving the pointer over
+// the browser terminal sends SGR mouse reports.
+test('mouse motion and wheel reports keep the session waiting; a click does not', () => {
+  const { dir, fake, mgr } = setup();
+  const { id } = mgr.start({ name: 's', cwd: dir });
+  fake.calls[0].pty.emit('Do you want to proceed?\n');
+  mgr.write(id, '\x1b[<35;99;29M');
+  mgr.write(id, '\x1b[<35;107;33M\x1b[<64;10;10M');
+  assert.equal(mgr.live(id).screenWaiting, true);
+  mgr.write(id, '\x1b[<0;10;10M');
+  assert.equal(mgr.live(id).screenWaiting, false);
+});
+
 test('exit records endedAt and exitCode, emits change; dismiss removes ended only', () => {
   const { dir, fake, mgr } = setup();
   const { id } = mgr.start({ name: 's', cwd: dir });

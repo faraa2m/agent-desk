@@ -20,6 +20,7 @@ let snapshotSubs;
 let snapshot;
 let snapshotFails = false;
 const sockets = [];
+const logLines = [];
 
 before(async () => {
   dir = mkdtempSync(join(tmpdir(), 'srv-'));
@@ -31,7 +32,7 @@ before(async () => {
     current: () => { if (snapshotFails) throw new Error('boom'); return snapshot; },
     subscribe: (cb) => { snapshotSubs.add(cb); return () => snapshotSubs.delete(cb); },
   };
-  server = createServer({ manager, poller, token: TOKEN, port: 0 });
+  server = createServer({ manager, poller, token: TOKEN, port: 0, log: (line) => logLines.push(line) });
   await once(server, 'listening');
   port = server.address().port;
 });
@@ -281,4 +282,31 @@ test('a 500 error log carries the path but never the token from the query string
   const text = logged.join('\n');
   assert.match(text, /GET \/api\/sessions/);
   assert.ok(!text.includes(TOKEN));
+});
+
+test('mutating API calls are logged with the session name and result, never the token', async () => {
+  logLines.length = 0;
+  const res = await request(`/api/sessions?key=${TOKEN}`, {
+    method: 'POST', headers: auth, body: { name: 'logged-one', cwd: dir, brief: 'secret brief text' },
+  });
+  assert.equal(res.status, 201);
+  const { id } = res.json;
+  await request(`/api/sessions/${id}`, { method: 'PATCH', headers: auth, body: { goal: 'g' } });
+  await request(`/api/sessions/${id}/stop`, { method: 'POST', headers: auth });
+  fake.calls.at(-1).pty.exit(0);
+  await request(`/api/sessions/${id}/dismiss`, { method: 'POST', headers: auth });
+  await request('/api/sessions/nope/resume', { method: 'POST', headers: auth });
+  await request('/api/sessions', { method: 'POST', body: { name: 'anon', cwd: dir } });
+  await request('/api/sessions', { headers: auth });
+  const text = logLines.join('\n');
+  assert.equal(logLines.length, 6, text);
+  assert.match(logLines[0], new RegExp(`^POST /api/sessions id=${id} name="logged-one" -> 201$`));
+  assert.match(logLines[1], new RegExp(`^PATCH /api/sessions/${id} id=${id} name="logged-one" -> 200$`));
+  assert.match(logLines[2], new RegExp(`^POST /api/sessions/${id}/stop id=${id} name="logged-one" -> 200$`));
+  assert.match(logLines[3], new RegExp(`^POST /api/sessions/${id}/dismiss id=${id} name="logged-one" -> 200$`));
+  assert.match(logLines[4], /^POST \/api\/sessions\/nope\/resume id=nope -> 404$/);
+  assert.match(logLines[5], /^POST \/api\/sessions -> 401$/);
+  assert.ok(!text.includes(TOKEN));
+  assert.ok(!text.includes('key='));
+  assert.ok(!text.includes('secret brief'));
 });

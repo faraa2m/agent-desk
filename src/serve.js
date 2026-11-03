@@ -22,7 +22,7 @@ export async function serve() {
   const spawn = await loadPtySpawn();
   const manager = new SessionManager({ stateFile: SESSIONS_FILE, spawn });
   const poller = startPoller({ manager, log });
-  const server = createServer({ manager, poller, token, port: PORT });
+  const server = createServer({ manager, poller, token, port: PORT, log });
 
   // Live sessions exist only inside this process, so one failed pty or
   // persistence callback must be logged rather than allowed to end them all.

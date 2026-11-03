@@ -150,6 +150,15 @@ function readBody(req) {
   });
 }
 
+// One server-log line for a call that changes sessions. The query string
+// (which may hold the token) and request bodies are never included.
+function auditLine(method, pathname, { id, name }, status) {
+  const parts = [method, pathname];
+  if (id) parts.push(`id=${id}`);
+  if (name !== undefined) parts.push(`name=${JSON.stringify(String(name))}`);
+  return `${parts.join(' ')} -> ${status}`;
+}
+
 function rejectUpgrade(socket, status, reason) {
   socket.end(`HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
 }
@@ -158,14 +167,19 @@ function rejectUpgrade(socket, status, reason) {
  * HTTP API, static page and WebSockets for agent-desk, bound to 127.0.0.1.
  * Every request needs a local Host header and, when it carries an Origin, a
  * local Origin. Every request except GET /api/health needs the token (query
- * `key`, `ad_key` cookie or bearer).
+ * `key`, `ad_key` cookie or bearer). Calls that change sessions are logged
+ * through `log`.
  */
-export function createServer({ manager, poller, token, port = PORT }) {
+export function createServer({ manager, poller, token, port = PORT, log = console.error }) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: BODY_MAX });
   const eventClients = new Set();
 
   const server = http.createServer((req, res) => {
-    handle(req, res).catch((err) => {
+    const pathname = parseUrl(req)?.pathname;
+    const mutating = (req.method === 'POST' || req.method === 'PATCH') && pathname?.startsWith('/api/sessions');
+    const audit = {};
+    if (mutating) res.on('finish', () => log(auditLine(req.method, pathname, audit, res.statusCode)));
+    handle(req, res, audit).catch((err) => {
       if (err instanceof HttpError) {
         if (!res.headersSent) sendJson(res, err.status, { error: err.message });
         return;
@@ -212,7 +226,8 @@ export function createServer({ manager, poller, token, port = PORT }) {
     return err;
   }
 
-  async function handle(req, res) {
+  // Fills `audit` with the id and name of the session a call acts on.
+  async function handle(req, res, audit) {
     if (!hostAllowed(req.headers.host) || !originAllowed(req.headers.origin)) {
       throw new HttpError(403, 'Forbidden');
     }
@@ -259,6 +274,7 @@ export function createServer({ manager, poller, token, port = PORT }) {
 
     if (path === '/api/sessions' && req.method === 'POST') {
       const body = await readBody(req);
+      if (typeof body.name === 'string') audit.name = body.name;
       let rec;
       try {
         rec = manager.start({
@@ -270,12 +286,16 @@ export function createServer({ manager, poller, token, port = PORT }) {
       } catch (err) {
         throw apiError(err);
       }
+      audit.id = rec.id;
       return sendJson(res, 201, rec);
     }
 
     const action = /^\/api\/sessions\/([^/]+)\/(stop|resume|dismiss)$/.exec(path);
     if (action && req.method === 'POST') {
       const [, id, verb] = action;
+      audit.id = id;
+      const name = manager.get(id)?.name;
+      if (name !== undefined) audit.name = name;
       let result;
       try {
         if (verb === 'stop') manager.stop(id);
@@ -289,6 +309,9 @@ export function createServer({ manager, poller, token, port = PORT }) {
 
     const one = /^\/api\/sessions\/([^/]+)$/.exec(path);
     if (one && req.method === 'PATCH') {
+      audit.id = one[1];
+      const name = manager.get(one[1])?.name;
+      if (name !== undefined) audit.name = name;
       const body = await readBody(req);
       try {
         manager.setGoal(one[1], typeof body.goal === 'string' ? body.goal : '');

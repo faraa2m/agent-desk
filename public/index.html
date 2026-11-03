@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agent-desk</title>
+<link rel="stylesheet" href="/vendor/xterm.css">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<aside id="sidebar">
+  <div id="list-header">
+    <h1>Sessions</h1>
+    <span id="conn" class="conn" hidden>disconnected</span>
+  </div>
+  <button id="new-btn" type="button">＋ New session</button>
+  <form id="new-form" hidden autocomplete="off">
+    <label>Name <input id="nf-name" required></label>
+    <label>Folder <input id="nf-cwd" required placeholder="~/Documents/dev/my-repo"></label>
+    <label>Agent (optional) <input id="nf-agent"></label>
+    <label>First prompt <textarea id="nf-brief" rows="4"></textarea></label>
+    <div class="row">
+      <button type="submit" id="nf-submit">Start</button>
+      <button type="button" id="nf-cancel" class="secondary">Cancel</button>
+    </div>
+    <p id="nf-error" class="form-error" hidden></p>
+  </form>
+  <ul id="list"></ul>
+</aside>
+<main id="main">
+  <header id="session-header" hidden></header>
+  <div id="panes"></div>
+  <div id="empty">Select a session, or start a new one.</div>
+</main>
+<script src="/vendor/xterm.js"></script>
+<script src="/vendor/addon-fit.js"></script>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>

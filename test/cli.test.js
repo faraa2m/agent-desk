@@ -20,10 +20,10 @@ let closedPort;
 let fake;
 let workDir;
 
-function run(args, p = port) {
+function run(args, p = port, extraEnv = {}) {
   return new Promise((resolve) => {
     execFile(process.execPath, [CLI, ...args], {
-      env: { ...process.env, AGENT_DESK_HOME: home, AGENT_DESK_PORT: String(p) },
+      env: { ...process.env, AGENT_DESK_HOME: home, AGENT_DESK_PORT: String(p), ...extraEnv },
     }, (err, stdout, stderr) => resolve({ code: err ? err.code : 0, stdout, stderr }));
   });
 }
@@ -61,6 +61,22 @@ test('launch against a closed port exits 3 with no output', async () => {
   assert.equal(r.code, 3);
   assert.equal(r.stdout, '');
   assert.equal(r.stderr, '');
+});
+
+test('launch to a server that accepts but never answers exits 1, not 3', async () => {
+  const held = [];
+  const silent = net.createServer((sock) => { held.push(sock); sock.resume(); }).listen(0, '127.0.0.1');
+  await once(silent, 'listening');
+  try {
+    const r = await run(['launch', 'n', workDir, 'hi'], silent.address().port, { AGENT_DESK_TIMEOUT_MS: '300' });
+    assert.equal(r.code, 1);
+    assert.equal(r.stdout, '');
+    assert.match(r.stderr, /agent-desk did not answer in time; the session may have started — check agent-desk/);
+    assert.ok(held.length >= 1, 'the request reached the server');
+  } finally {
+    for (const sock of held) sock.destroy();
+    await new Promise((r) => silent.close(r));
+  }
 });
 
 test('launch passes the brief file contents as the last claude argument', async () => {

@@ -8,8 +8,23 @@ import { LOG_FILE, PORT, STATE_DIR, TOKEN_FILE } from '../src/config.js';
 const SELF = fileURLToPath(import.meta.url);
 const BASE = `http://127.0.0.1:${PORT}`;
 const EXIT_UNREACHABLE = 3;
+const TIMEOUT_MS = Number(process.env.AGENT_DESK_TIMEOUT_MS) || 5000;
+// Connect errors that mean no server is listening, so nothing was sent.
+const NOT_LISTENING = new Set(['ECONNREFUSED', 'ENOENT', 'EADDRNOTAVAIL']);
+const NO_ANSWER = 'agent-desk did not answer in time; the session may have started — check agent-desk';
 
+/** Nothing is listening, so the request never reached agent-desk. */
 class Unreachable extends Error {}
+/** The request may have reached agent-desk, which gave no usable answer. */
+class NoAnswer extends Error {}
+
+function connectCode(err) {
+  for (let e = err; e; e = e.cause) {
+    if (e.code) return e.code;
+    if (Array.isArray(e.errors)) return e.errors.map((x) => x?.code).find(Boolean);
+  }
+  return undefined;
+}
 
 function readToken() {
   try {
@@ -29,10 +44,11 @@ async function api(method, path, token, body) {
         ...(body ? { 'content-type': 'application/json' } : {}),
       },
       body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-  } catch {
-    throw new Unreachable();
+  } catch (err) {
+    if (NOT_LISTENING.has(connectCode(err))) throw new Unreachable();
+    throw new NoAnswer(err.name === 'TimeoutError' ? NO_ANSWER : `agent-desk request failed: ${err.message}`);
   }
   let json = null;
   try {
@@ -112,6 +128,11 @@ async function launch(args) {
     res = await api('POST', '/api/sessions', token, { name, cwd: resolve(dir), agent: agent ?? undefined, brief });
   } catch (err) {
     if (err instanceof Unreachable) return EXIT_UNREACHABLE;
+    // Exit 1, not 3, so launch-session does not start the same session elsewhere.
+    if (err instanceof NoAnswer) {
+      console.error(err.message);
+      return 1;
+    }
     throw err;
   }
   if (!res.ok) {

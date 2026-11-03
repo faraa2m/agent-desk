@@ -87,6 +87,8 @@ function connectTerminal(entry) {
     entry.ws.onclose = null;
     entry.ws.close();
   }
+  // The server replays scrollback on every attach, so start from a clean buffer.
+  entry.term.reset();
   const ws = new WebSocket(wsUrl(`/ws/term/${encodeURIComponent(entry.id)}`));
   ws.binaryType = 'arraybuffer';
   entry.ws = ws;
@@ -116,7 +118,8 @@ function ensureTerminal(id) {
   if (entry) return entry;
   const host = el('div', { class: 'xterm-host' });
   const notice = el('div', { class: 'notice', hidden: '' });
-  const pane = el('div', { class: 'pane' }, host, notice);
+  const pane = el('div', { class: 'pane active' }, host, notice);
+  for (const other of terminals.values()) other.pane.classList.remove('active');
   panesEl.append(pane);
   const term = new Terminal({
     cursorBlink: true,
@@ -135,6 +138,10 @@ function ensureTerminal(id) {
   term.onResize(() => sendResize(entry));
   terminals.set(id, entry);
   connectTerminal(entry);
+  requestAnimationFrame(() => {
+    fitTerminal(entry);
+    sendResize(entry);
+  });
   return entry;
 }
 
@@ -326,7 +333,6 @@ function applySnapshot(next) {
       disposeTerminal(id);
     } else if (prev?.get(id) === 'ended' && s.status !== 'ended') {
       const entry = terminals.get(id);
-      entry.term.reset();
       entry.attempt = 0;
       connectTerminal(entry);
     }

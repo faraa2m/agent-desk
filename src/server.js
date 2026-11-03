@@ -320,7 +320,9 @@ export function createServer({ manager, poller, token, port = PORT }) {
       return;
     }
     ws.on('close', () => attachment.detach());
-    if (attachment.scrollback) ws.send(attachment.scrollback);
+    // The first message is always the scrollback, empty or not, so the client
+    // knows where the replay ends.
+    ws.send(attachment.scrollback);
     ws.on('message', (data, isBinary) => {
       if (isBinary) return;
       let msg;

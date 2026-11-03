@@ -201,6 +201,17 @@ test('/ws/events sends the snapshot on connect and on every update', async () =>
   ws.close();
 });
 
+test('/ws/term always sends the scrollback first, even when it is empty', async () => {
+  const res = await request('/api/sessions', { method: 'POST', headers: auth, body: { name: 'fresh', cwd: dir } });
+  const ws = connect(`/ws/term/${res.json.id}`);
+  assert.equal(await nextMessage(ws), '');
+  const live = nextMessage(ws);
+  fake.calls.at(-1).pty.emit('live');
+  assert.equal(await live, 'live');
+  ws.close();
+  fake.calls.at(-1).pty.exit(0);
+});
+
 test('/ws/term for an unknown id closes with 4404', async () => {
   const ws = connect('/ws/term/nope');
   const [code] = await once(ws, 'close');

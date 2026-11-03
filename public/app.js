@@ -87,11 +87,16 @@ function setNotice(entry, text) {
 function connectTerminal(entry) {
   clearTimeout(entry.retryTimer);
   if (entry.ws) {
+    entry.ws.onmessage = null;
     entry.ws.onclose = null;
     entry.ws.close();
   }
   // The server replays scrollback on every attach, so start from a clean buffer.
   entry.term.reset();
+  // Queries in the replayed scrollback make xterm.js answer them; those
+  // answers are stale and must not reach the live session.
+  entry.replaying = true;
+  let first = true;
   const ws = new WebSocket(wsUrl(`/ws/term/${encodeURIComponent(entry.id)}`));
   ws.binaryType = 'arraybuffer';
   entry.ws = ws;
@@ -101,7 +106,15 @@ function connectTerminal(entry) {
     sendResize(entry);
   };
   ws.onmessage = (ev) => {
-    entry.term.write(typeof ev.data === 'string' ? ev.data : new Uint8Array(ev.data));
+    const data = typeof ev.data === 'string' ? ev.data : new Uint8Array(ev.data);
+    if (!first) {
+      entry.term.write(data);
+      return;
+    }
+    first = false;
+    entry.term.write(data, () => {
+      if (entry.ws === ws) entry.replaying = false;
+    });
   };
   ws.onclose = (ev) => {
     if (entry.ws !== ws) return;
@@ -134,8 +147,9 @@ function ensureTerminal(id) {
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open(host);
-  entry = { id, term, fit, pane, notice, ws: null, attempt: 0, retryTimer: null };
+  entry = { id, term, fit, pane, notice, ws: null, attempt: 0, retryTimer: null, replaying: false };
   term.onData((data) => {
+    if (entry.replaying) return;
     if (entry.ws?.readyState === WebSocket.OPEN) entry.ws.send(JSON.stringify({ type: 'input', data }));
   });
   term.onResize(() => sendResize(entry));

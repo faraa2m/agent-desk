@@ -317,6 +317,7 @@ function applySnapshot(next) {
   const prev = previousStatus;
   previousStatus = new Map(next.map((s) => [s.id, s.status]));
   sessions = next;
+  renderTeamLeadButton();
 
   const needs = next.filter((s) => s.status === 'needs-you').length;
   document.title = needs > 0 ? `(${needs}) agent-desk` : 'agent-desk';
@@ -413,6 +414,42 @@ form.addEventListener('submit', async (e) => {
     formError.hidden = false;
   } finally {
     $('nf-submit').disabled = false;
+  }
+});
+
+// ---------- team-lead button ----------
+
+const tlBtn = $('tl-btn');
+const TEAM_LEAD_BODY = { name: 'team-lead', agent: 'team-lead', cwd: '~/Documents/dev', brief: 'Start your loop.' };
+const teamLeadSession = () => sessions.find((s) => s.pinned);
+
+function renderTeamLeadButton() {
+  const tl = teamLeadSession();
+  const live = Boolean(tl) && tl.status !== 'ended';
+  tlBtn.disabled = live;
+  tlBtn.textContent = live ? 'team-lead running' : tl?.resumable ? '↻ Resume team-lead' : '▶ Start team-lead';
+}
+
+tlBtn.addEventListener('click', async () => {
+  const tl = teamLeadSession();
+  if (tl && tl.status !== 'ended') return;
+  tlBtn.disabled = true;
+  try {
+    if (tl?.resumable) {
+      await api('POST', `${idPath(tl)}/resume`);
+      select(tl.id);
+      return;
+    }
+    if (tl) await api('POST', `${idPath(tl)}/dismiss`);
+    const rec = await api('POST', '/api/sessions', TEAM_LEAD_BODY);
+    if (rec?.id) {
+      if (!sessionById(rec.id)) sessions = [...sessions, { ...rec, status: 'working', color: rec.color ?? '#3b82f6' }];
+      select(rec.id);
+    }
+  } catch (err) {
+    showToast(err);
+  } finally {
+    renderTeamLeadButton();
   }
 });
 

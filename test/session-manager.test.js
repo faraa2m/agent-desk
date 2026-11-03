@@ -32,6 +32,26 @@ test('start passes args exactly and a hostile brief stays one argv element', () 
   assert.equal(rec.endedAt, null);
 });
 
+test('the spawned env does not carry the terminal that started the server', () => {
+  const { dir, fake, mgr } = setup();
+  const saved = { p: process.env.TERM_PROGRAM, v: process.env.TERM_PROGRAM_VERSION };
+  process.env.TERM_PROGRAM = 'iTerm.app';
+  process.env.TERM_PROGRAM_VERSION = '3.5.0';
+  try {
+    mgr.start({ name: 'env', cwd: dir });
+  } finally {
+    for (const [k, v] of [['TERM_PROGRAM', saved.p], ['TERM_PROGRAM_VERSION', saved.v]]) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+  const { env } = fake.calls[0].opts;
+  assert.equal('TERM_PROGRAM' in env, false);
+  assert.equal('TERM_PROGRAM_VERSION' in env, false);
+  assert.equal(env.TERM, 'xterm-256color');
+  assert.equal(env.PATH, process.env.PATH);
+});
+
 test('start without agent or brief passes only the name; goal is cut to 120 chars', () => {
   const { dir, fake, mgr } = setup();
   mgr.start({ name: 'a', cwd: dir });

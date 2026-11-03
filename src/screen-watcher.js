@@ -2,6 +2,8 @@ const ESC = '\x1b';
 const BEL = '\x07';
 const TAIL_LIMIT = 4096;
 const CARRY_LIMIT = 4096;
+// Visible text: anything other than whitespace and control characters.
+const VISIBLE = /[^\s\x00-\x1f\x7f]/;
 
 const PROMPT_PATTERNS = [
   /Do\s+you\s+want\s+to\s+(proceed|make\s+this\s+edit|create|run|allow)/i,
@@ -40,13 +42,16 @@ function isNotificationOsc(body) {
 /**
  * Scans raw terminal output for signs that the session is waiting on the user:
  * a prompt in the visible text, a bell, or an OSC 9 / OSC 777 notification.
+ * A bell holds until the user types or the session prints visible text that
+ * is not a prompt, which means it carried on without the user.
  * An escape sequence split across feed() calls is held back and parsed once
  * the rest arrives.
  */
 export class ScreenWatcher {
   #carry = '';
   #tail = '';
-  #bellPending = false;
+  #bellAt = null;
+  #sinceBell = '';
 
   feed(chunk) {
     const s = this.#carry + chunk;
@@ -57,12 +62,13 @@ export class ScreenWatcher {
     while (i < s.length) {
       const c = s[i];
       if (c === BEL) {
-        this.#bellPending = true;
+        this.#ring();
         i += 1;
         continue;
       }
       if (c !== ESC) {
         text += c;
+        if (this.#bellAt !== null) this.#sinceBell += c;
         i += 1;
         continue;
       }
@@ -72,11 +78,28 @@ export class ScreenWatcher {
         if (rest.length <= CARRY_LIMIT) this.#carry = rest;
         break;
       }
-      if (s[i + 1] === '[' && CURSOR_MOVES.has(s[end - 1])) text += ' ';
+      if (s[i + 1] === '[' && CURSOR_MOVES.has(s[end - 1])) {
+        text += ' ';
+        if (this.#bellAt !== null) this.#sinceBell += ' ';
+      }
       i = end;
     }
 
     if (text) this.#tail = (this.#tail + text).slice(-TAIL_LIMIT);
+    if (this.#bellAt !== null) {
+      this.#sinceBell = this.#sinceBell.slice(-TAIL_LIMIT);
+      if (VISIBLE.test(this.#sinceBell) && !detectPrompt(this.#sinceBell)) this.#clearBell();
+    }
+  }
+
+  #ring() {
+    this.#bellAt = Date.now();
+    this.#sinceBell = '';
+  }
+
+  #clearBell() {
+    this.#bellAt = null;
+    this.#sinceBell = '';
   }
 
   // Returns the index just past the escape sequence starting at `start`, or -1
@@ -93,7 +116,7 @@ export class ScreenWatcher {
             if (j + 1 >= s.length) return -1;
             if (s[j + 1] !== '\\') return j; // another sequence begins; abandon this OSC
           }
-          if (isNotificationOsc(s.slice(start + 2, j))) this.#bellPending = true;
+          if (isNotificationOsc(s.slice(start + 2, j))) this.#ring();
           return ch === BEL ? j + 1 : j + 2;
         }
       }
@@ -120,11 +143,16 @@ export class ScreenWatcher {
   }
 
   userInput() {
-    this.#bellPending = false;
+    this.#clearBell();
     this.#tail = '';
   }
 
+  /** When the pending bell rang (ms since the epoch), or null when none is pending. */
+  get bellAt() {
+    return this.#bellAt;
+  }
+
   get waiting() {
-    return this.#bellPending || detectPrompt(this.#tail);
+    return this.#bellAt !== null || detectPrompt(this.#tail);
   }
 }

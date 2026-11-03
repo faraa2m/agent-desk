@@ -152,3 +152,46 @@ test('permission question laid out with cursor moves sets waiting', () => {
   w.feed('\r\x1b[1C\x1b[1B\x1b[39mDo\x1b[5Gyou\x1b[9Gwant\x1b[14Gto\x1b[17Gcreate\x1b[24G\x1b[1mad-e2e-2.txt\x1b[22m?');
   assert.equal(w.waiting, true);
 });
+
+test('a bell records when it rang; userInput clears it', () => {
+  const w = new ScreenWatcher();
+  assert.equal(w.bellAt, null);
+  const before = Date.now();
+  w.feed('\x07');
+  assert.ok(w.bellAt >= before && w.bellAt <= Date.now());
+  w.userInput();
+  assert.equal(w.bellAt, null);
+});
+
+test('ordinary output after a bell clears it', () => {
+  const w = new ScreenWatcher();
+  w.feed('\x1b]9;Claude needs your input\x07');
+  assert.equal(w.waiting, true);
+  w.feed('\x1b[2K\x1b[1G\x1b[38;5;174mWorking…\x1b[39m');
+  assert.equal(w.waiting, false);
+  assert.equal(w.bellAt, null);
+});
+
+test('text after the bell in the same chunk clears it; text before it does not', () => {
+  const a = new ScreenWatcher();
+  a.feed('done\x07');
+  assert.equal(a.waiting, true);
+  const b = new ScreenWatcher();
+  b.feed('\x07Working…');
+  assert.equal(b.waiting, false);
+});
+
+test('a prompt after a bell keeps waiting', () => {
+  const w = new ScreenWatcher();
+  w.feed('\x07');
+  w.feed('\x1b[1mDo you want to proceed?\x1b[22m\r\n❯ 1. Yes\r\n');
+  assert.equal(w.waiting, true);
+  assert.notEqual(w.bellAt, null);
+});
+
+test('only escape sequences and whitespace after a bell keep waiting', () => {
+  const w = new ScreenWatcher();
+  w.feed('\x1b]777;notify;Claude;needs you\x07');
+  w.feed('\x1b[?25l\x1b[2K\x1b[1A\x1b]0;title\x07\x1b[38;5;174m\r\n  \x1b[39m\x1b[?25h');
+  assert.equal(w.waiting, true);
+});

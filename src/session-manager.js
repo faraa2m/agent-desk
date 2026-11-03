@@ -122,11 +122,15 @@ export class SessionManager extends EventEmitter {
   }
 
   #launch(rec, args) {
+    // The session runs in xterm.js, whatever terminal started the server.
+    const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
+    delete env.TERM_PROGRAM;
+    delete env.TERM_PROGRAM_VERSION;
     const pty = this.#spawn(this.#claudeBin, args, {
       cwd: rec.cwd,
       cols: COLS,
       rows: ROWS,
-      env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' },
+      env,
       name: 'xterm-256color',
     });
     const watcher = new ScreenWatcher();

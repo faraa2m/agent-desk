@@ -63,6 +63,8 @@ Dragging or pasting a file onto a session's terminal types its path into the ses
 
 The desk can send input to local agent processes. Treat its authentication token and authenticated browser as access to those processes. Keep it on loopback; remote hosting and multi-user operation are outside the supported setup. Do not attach tokens, private prompts, or terminal transcripts to public issues.
 
+See [Architecture](docs/architecture.md) for the browser, server, session, and storage flows.
+
 ## Development
 
 ```sh

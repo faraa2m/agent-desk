@@ -2,7 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import http from 'node:http';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import WebSocket from 'ws';
@@ -19,6 +19,7 @@ let dir;
 let snapshotSubs;
 let snapshot;
 let snapshotFails = false;
+const found = {};
 const sockets = [];
 const logLines = [];
 
@@ -32,7 +33,7 @@ before(async () => {
     current: () => { if (snapshotFails) throw new Error('boom'); return snapshot; },
     subscribe: (cb) => { snapshotSubs.add(cb); return () => snapshotSubs.delete(cb); },
   };
-  server = createServer({ manager, poller, token: TOKEN, port: 0, log: (line) => logLines.push(line) });
+  server = createServer({ manager, poller, token: TOKEN, port: 0, uploadsDir: join(dir, 'uploads'), find: async (name) => found[name] ?? [], log: (line) => logLines.push(line) });
   await once(server, 'listening');
   port = server.address().port;
 });
@@ -58,7 +59,8 @@ function request(path, { method = 'GET', headers = {}, body } = {}) {
       });
     });
     req.on('error', reject);
-    if (body !== undefined) req.end(typeof body === 'string' ? body : JSON.stringify(body));
+    if (Buffer.isBuffer(body)) req.end(body);
+    else if (body !== undefined) req.end(typeof body === 'string' ? body : JSON.stringify(body));
     else req.end();
   });
 }
@@ -309,4 +311,69 @@ test('mutating API calls are logged with the session name and result, never the 
   assert.ok(!text.includes(TOKEN));
   assert.ok(!text.includes('key='));
   assert.ok(!text.includes('secret brief'));
+});
+
+test('POST /api/upload saves a file for a live session under a sanitized name and returns its private path', async () => {
+  const created = await request('/api/sessions', { method: 'POST', headers: auth, body: { name: 'upload-one', cwd: dir } });
+  const data = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+  const res = await request(`/api/upload?session=${created.json.id}`, {
+    method: 'POST',
+    headers: { ...auth, 'content-type': 'application/pdf', 'x-file-name': encodeURIComponent('../../my report (1).pdf') },
+    body: data,
+  });
+  assert.equal(res.status, 201);
+  assert.match(res.json.path, /uploads\/\d+-[0-9a-f]{8}-my_report__1_.pdf$/);
+  assert.deepEqual(readFileSync(res.json.path), data);
+  assert.equal(statSync(res.json.path).mode & 0o777, 0o600);
+});
+
+test('POST /api/upload falls back to a generic name when none or a hostile one is given', async () => {
+  const created = await request('/api/sessions', { method: 'POST', headers: auth, body: { name: 'upload-name', cwd: dir } });
+  const up = (name) => request(`/api/upload?session=${created.json.id}`, {
+    method: 'POST',
+    headers: { ...auth, 'content-type': 'application/octet-stream', ...(name === undefined ? {} : { 'x-file-name': name }) },
+    body: Buffer.from('x'),
+  });
+  assert.match((await up()).json.path, /-file$/);
+  assert.match((await up('%E0%A4%A')).json.path, /-file$/);
+  assert.match((await up('..')).json.path, /-file$/);
+  assert.match((await up('.env')).json.path, /-env$/);
+});
+
+test('POST /api/upload needs the token, a known session and a body', async () => {
+  const created = await request('/api/sessions', { method: 'POST', headers: auth, body: { name: 'upload-two', cwd: dir } });
+  const data = Buffer.from([1, 2, 3]);
+  const post = (query, headers, body = data) => request(`/api/upload${query}`, { method: 'POST', headers, body });
+  assert.equal((await post(`?session=${created.json.id}`, {})).status, 401);
+  assert.equal((await post('?session=nope', auth)).status, 404);
+  assert.equal((await post('', auth)).status, 404);
+  assert.equal((await post(`?session=${created.json.id}`, auth, Buffer.alloc(0))).status, 400);
+});
+
+test('POST /api/upload refuses a file over the size limit', async () => {
+  const created = await request('/api/sessions', { method: 'POST', headers: auth, body: { name: 'upload-big', cwd: dir } });
+  const res = await request(`/api/upload?session=${created.json.id}`, {
+    method: 'POST',
+    headers: auth,
+    body: Buffer.alloc(50 * 1024 * 1024 + 1),
+  }).catch((err) => ({ status: err.code }));
+  assert.ok(res.status === 413 || res.status === 'ECONNRESET' || res.status === 'EPIPE', String(res.status));
+});
+
+test('POST /api/locate returns the original path only when size and modified time match', async () => {
+  const real = join(dir, 'notes.txt');
+  writeFileSync(real, 'hello');
+  const when = new Date('2026-01-02T03:04:05Z');
+  utimesSync(real, when, when);
+  const other = join(dir, 'other', 'notes.txt');
+  found['notes.txt'] = [other, real, join(dir, 'uploads', 'notes.txt')];
+  const ask = (body, headers = auth) => request('/api/locate', { method: 'POST', headers, body });
+  const good = { name: 'notes.txt', size: 5, lastModified: when.getTime() };
+  assert.deepEqual((await ask(good)).json, { path: real });
+  assert.deepEqual((await ask({ ...good, size: 6 })).json, { path: null });
+  assert.deepEqual((await ask({ ...good, lastModified: when.getTime() + 60000 })).json, { path: null });
+  assert.deepEqual((await ask({ ...good, name: 'missing.txt' })).json, { path: null });
+  assert.equal((await ask({ ...good, name: '../notes.txt' })).status, 400);
+  assert.equal((await ask({ name: 'notes.txt' })).status, 400);
+  assert.equal((await ask(good, {})).status, 401);
 });

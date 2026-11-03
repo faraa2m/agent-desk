@@ -11,6 +11,7 @@ export const PORT = Number(process.env.AGENT_DESK_PORT) || 47321;
 export const STATE_DIR = expandHome(process.env.AGENT_DESK_HOME || '~/.agent-desk');
 export const TOKEN_FILE = join(STATE_DIR, 'token');
 export const SESSIONS_FILE = join(STATE_DIR, 'sessions.json');
+export const UPLOADS_DIR = join(STATE_DIR, 'uploads');
 export const LOG_FILE = join(STATE_DIR, 'server.log');
 export const CLAUDE_SESSIONS_DIR = expandHome('~/.claude/sessions');
 export const SCANNER_SCRIPT = expandHome('~/.claude/skills/team-lead/scripts/scan_sessions.py');

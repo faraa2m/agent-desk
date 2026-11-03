@@ -20,7 +20,7 @@ test('start passes args exactly and a hostile brief stays one argv element', () 
   const rec = mgr.start({ name: 'my session', cwd: dir, agent: 'reviewer', brief });
   const call = fake.calls[0];
   assert.equal(call.file, 'claude');
-  assert.deepEqual(call.args, ['-n', 'my session', '--agent', 'reviewer', brief]);
+  assert.deepEqual(call.args, ['-n', 'my session', '--agent', 'reviewer', '--', brief]);
   assert.equal(call.opts.cwd, dir);
   assert.equal(call.opts.cols, 120);
   assert.equal(call.opts.rows, 40);
@@ -38,6 +38,14 @@ test('start without agent or brief passes only the name; goal is cut to 120 char
   assert.deepEqual(fake.calls[0].args, ['-n', 'a']);
   const rec = mgr.start({ name: 'b', cwd: dir, brief: `\n\n${'x'.repeat(200)}\nrest` });
   assert.equal(rec.goal, 'x'.repeat(120));
+});
+
+test('a brief that starts with a dash follows -- so claude reads it as the prompt', () => {
+  const { dir, fake, mgr } = setup();
+  mgr.start({ name: 'bullets', cwd: dir, brief: '- a\n- b' });
+  mgr.start({ name: 'flag', cwd: dir, brief: '--settings=/tmp/x.json' });
+  assert.deepEqual(fake.calls[0].args, ['-n', 'bullets', '--', '- a\n- b']);
+  assert.deepEqual(fake.calls[1].args, ['-n', 'flag', '--', '--settings=/tmp/x.json']);
 });
 
 test('start validates name, directory and uniqueness among live sessions', () => {

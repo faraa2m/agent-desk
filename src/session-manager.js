@@ -179,7 +179,8 @@ export class SessionManager extends EventEmitter {
     };
     this.#records.set(rec.id, rec);
     this.#scrollbacks.set(rec.id, new Scrollback());
-    const args = ['-n', name, ...(agent ? ['--agent', agent] : []), ...(brief ? [brief] : [])];
+    // `--` ends option parsing, so a brief that starts with `-` stays the prompt.
+    const args = ['-n', name, ...(agent ? ['--agent', agent] : []), ...(brief ? ['--', brief] : [])];
     try {
       this.#launch(rec, args);
     } catch (err) {

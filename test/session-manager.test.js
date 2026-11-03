@@ -88,6 +88,18 @@ test('write forwards to the pty and resize applies', () => {
   assert.equal(mgr.live(id).screenWaiting, false);
 });
 
+test('focus reports from the browser terminal are forwarded but keep the session waiting', () => {
+  const { dir, fake, mgr } = setup();
+  const { id } = mgr.start({ name: 's', cwd: dir });
+  fake.calls[0].pty.emit('Do you want to proceed?\n');
+  mgr.write(id, '\x1b[I');
+  mgr.write(id, '\x1b[O\x1b[I');
+  assert.deepEqual(fake.calls[0].pty.written, ['\x1b[I', '\x1b[O\x1b[I']);
+  assert.equal(mgr.live(id).screenWaiting, true);
+  mgr.write(id, '\x1b[I1');
+  assert.equal(mgr.live(id).screenWaiting, false);
+});
+
 test('exit records endedAt and exitCode, emits change; dismiss removes ended only', () => {
   const { dir, fake, mgr } = setup();
   const { id } = mgr.start({ name: 's', cwd: dir });

@@ -9,6 +9,8 @@ import { ScreenWatcher } from './screen-watcher.js';
 const COLS = 120;
 const ROWS = 40;
 const GOAL_MAX = 120;
+// Focus-in/focus-out reports a terminal sends when it gains or loses focus.
+const FOCUS_REPORTS = /\x1b\[[IO]/g;
 
 function fail(code, message) {
   return Object.assign(new Error(message), { code });
@@ -210,7 +212,8 @@ export class SessionManager extends EventEmitter {
   write(id, data) {
     const entry = this.#live.get(id);
     if (!entry) return;
-    entry.watcher.userInput();
+    // Selecting a session focuses its terminal; that alone does not answer a prompt.
+    if (String(data).replace(FOCUS_REPORTS, '') !== '') entry.watcher.userInput();
     entry.pty.write(data);
   }
 

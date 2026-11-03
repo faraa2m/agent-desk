@@ -1,10 +1,11 @@
 import http from 'node:http';
-import { timingSafeEqual } from 'node:crypto';
-import { createReadStream, statSync } from 'node:fs';
-import { dirname, extname, join, resolve, sep } from 'node:path';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { createReadStream, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { PORT } from './config.js';
+import { PORT, UPLOADS_DIR } from './config.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC_DIR = join(ROOT, 'public');
@@ -24,6 +25,10 @@ const CONTENT_TYPES = {
   '.ico': 'image/x-icon',
 };
 const BODY_MAX = 1024 * 1024;
+const UPLOAD_MAX = 50 * 1024 * 1024;
+const UPLOAD_NAME_MAX = 80;
+const LOCATE_TIMEOUT_MS = 3000;
+const LOCATE_MTIME_SLACK_MS = 2000;
 const COOKIE = 'ad_key';
 const COOKIE_MAX_AGE = 400 * 24 * 60 * 60;
 const SIGN_IN_PAGE = `<!DOCTYPE html>
@@ -119,6 +124,47 @@ function publicPath(rel) {
   return file.startsWith(PUBLIC_DIR + sep) ? file : null;
 }
 
+// A safe single path segment for an uploaded file: no directories, no spaces
+// or shell-significant characters, so the typed path needs no quoting.
+function uploadName(header) {
+  let raw = '';
+  try {
+    raw = decodeURIComponent(String(header ?? ''));
+  } catch {
+    raw = '';
+  }
+  const base = raw.split(/[\\/]/).pop().replace(/[^A-Za-z0-9._-]/g, '_').replace(/^\.+/, '');
+  return (base || 'file').slice(-UPLOAD_NAME_MAX);
+}
+
+// Paths Spotlight knows with exactly this file name; empty when Spotlight is
+// unavailable or slow.
+function spotlightFind(name) {
+  return new Promise((resolveFind) => {
+    execFile('mdfind', ['-name', name], { timeout: LOCATE_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 }, (err, out) => {
+      resolveFind(err ? [] : String(out).split('\n').filter(Boolean));
+    });
+  });
+}
+
+function readUpload(req) {
+  return new Promise((resolveBody, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > UPLOAD_MAX) {
+        reject(new HttpError(413, 'File too large'));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolveBody(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
 function readBody(req) {
   return new Promise((resolveBody, reject) => {
     const chunks = [];
@@ -170,7 +216,8 @@ function rejectUpgrade(socket, status, reason) {
  * `key`, `ad_key` cookie or bearer). Calls that change sessions are logged
  * through `log`.
  */
-export function createServer({ manager, poller, token, port = PORT, log = console.error }) {
+export function createServer({ manager, poller, token, port = PORT, uploadsDir = UPLOADS_DIR, find = spotlightFind, log = console.error }) {
+  uploadsDir = resolve(uploadsDir);
   const wss = new WebSocketServer({ noServer: true, maxPayload: BODY_MAX });
   const eventClients = new Set();
 
@@ -288,6 +335,42 @@ export function createServer({ manager, poller, token, port = PORT, log = consol
       }
       audit.id = rec.id;
       return sendJson(res, 201, rec);
+    }
+
+    // A browser never exposes a dropped file's real path, so find the original
+    // by name, then keep only a file whose size and modified time match.
+    if (path === '/api/locate' && req.method === 'POST') {
+      const body = await readBody(req);
+      const { name, size, lastModified } = body;
+      if (typeof name !== 'string' || !name || name !== basename(name) || !Number.isFinite(size) || !Number.isFinite(lastModified)) {
+        throw new HttpError(400, 'name, size and lastModified are required');
+      }
+      const matches = [];
+      for (const candidate of await find(name)) {
+        if (basename(candidate) !== name || candidate.startsWith(uploadsDir + sep)) continue;
+        let stat;
+        try {
+          stat = statSync(candidate);
+        } catch {
+          continue;
+        }
+        if (stat.isFile() && stat.size === size && Math.abs(stat.mtimeMs - lastModified) <= LOCATE_MTIME_SLACK_MS) {
+          matches.push({ candidate, mtimeMs: stat.mtimeMs });
+        }
+      }
+      return sendJson(res, 200, { path: matches.length === 1 ? matches[0].candidate : null });
+    }
+
+    if (path === '/api/upload' && req.method === 'POST') {
+      const id = url.searchParams.get('session');
+      if (!id || !manager.get(id)) throw new HttpError(404, 'Session not found');
+      const name = uploadName(req.headers['x-file-name']);
+      const data = await readUpload(req);
+      if (data.length === 0) throw new HttpError(400, 'Empty file');
+      mkdirSync(uploadsDir, { recursive: true, mode: 0o700 });
+      const file = join(uploadsDir, `${Date.now()}-${randomBytes(4).toString('hex')}-${name}`);
+      writeFileSync(file, data, { mode: 0o600 });
+      return sendJson(res, 201, { path: file });
     }
 
     const action = /^\/api\/sessions\/([^/]+)\/(stop|resume|dismiss)$/.exec(path);

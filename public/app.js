@@ -129,6 +129,70 @@ function connectTerminal(entry) {
   };
 }
 
+function typeInto(entry, text) {
+  if (entry.ws?.readyState === WebSocket.OPEN) entry.ws.send(JSON.stringify({ type: 'input', data: text }));
+}
+
+// The original file's path on this machine, or null when it cannot be found
+// (a pasted screenshot, a file that has moved).
+async function locateFile(file) {
+  if (!file.name || !file.size) return null;
+  try {
+    const res = await fetch('/api/locate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: file.name, size: file.size, lastModified: file.lastModified }),
+    });
+    return res.ok ? (await res.json()).path : null;
+  } catch {
+    return null;
+  }
+}
+
+// Types each file's path into the session, which is how Claude Code reads a
+// local file or attaches an image: the original path when it can be found,
+// otherwise a saved copy.
+async function sendFiles(entry, files) {
+  for (const file of files) {
+    try {
+      const original = await locateFile(file);
+      if (original) {
+        typeInto(entry, `${original.replace(/([^A-Za-z0-9_./~-])/g, '\\$1')} `);
+        continue;
+      }
+      const res = await fetch(`/api/upload?session=${encodeURIComponent(entry.id)}`, {
+        method: 'POST',
+        headers: { 'content-type': file.type || 'application/octet-stream', 'x-file-name': encodeURIComponent(file.name) },
+        body: file,
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? `Upload failed (${res.status})`);
+      typeInto(entry, `${body.path.replace(/([^A-Za-z0-9_./~-])/g, '\\$1')} `);
+    } catch (err) {
+      setNotice(entry, err.message);
+    }
+  }
+}
+
+function enableFileInput(entry, host) {
+  // Capture phase so xterm's own paste handler never sees a file paste.
+  host.addEventListener('paste', (e) => {
+    const files = Array.from(e.clipboardData?.files ?? []);
+    if (files.length === 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    sendFiles(entry, files);
+  }, true);
+  host.addEventListener('dragover', (e) => {
+    if (Array.from(e.dataTransfer?.types ?? []).includes('Files')) e.preventDefault();
+  });
+  host.addEventListener('drop', (e) => {
+    const files = Array.from(e.dataTransfer?.files ?? []);
+    e.preventDefault();
+    if (files.length > 0) sendFiles(entry, files);
+  });
+}
+
 function ensureTerminal(id) {
   let entry = terminals.get(id);
   if (entry) return entry;
@@ -153,6 +217,7 @@ function ensureTerminal(id) {
     if (entry.ws?.readyState === WebSocket.OPEN) entry.ws.send(JSON.stringify({ type: 'input', data }));
   });
   term.onResize(() => sendResize(entry));
+  enableFileInput(entry, host);
   terminals.set(id, entry);
   connectTerminal(entry);
   requestAnimationFrame(() => {

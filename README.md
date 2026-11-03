@@ -59,7 +59,11 @@ Set the same port and home for the server and CLI. The login installer does not 
 
 Optional session discovery reads `~/.claude/sessions`, the team-lead scanner at `~/.claude/skills/team-lead/scripts/scan_sessions.py`, and `~/.claude/team-lead/ledger.jsonl`. These are local integrations, not dependencies supplied by this repository.
 
+Dragging or pasting a file onto a session's terminal types its path into the session so Claude Code can read it or attach the image. A browser never reveals a file's real path, so `POST /api/locate` finds the original with Spotlight (`mdfind`), keeping only a file whose name, size and modified time match. When none is found, as for a pasted screenshot, the file (up to 50 MB) is uploaded to `POST /api/upload?session=<id>` and saved under `$AGENT_DESK_HOME/uploads` (mode 0600, name reduced to letters, digits, `.`, `_` and `-`). Saved uploads are not cleaned up automatically.
+
 The desk can send input to local agent processes. Treat its authentication token and authenticated browser as access to those processes. Keep it on loopback; remote hosting and multi-user operation are outside the supported setup. Do not attach tokens, private prompts, or terminal transcripts to public issues.
+
+See [Architecture](docs/architecture.md) for the browser, server, session, and storage flows.
 
 ## Development
 

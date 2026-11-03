@@ -2,9 +2,9 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import http from 'node:http';
-import { mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, mkdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative, isAbsolute } from 'node:path';
 import WebSocket from 'ws';
 import { SessionManager } from '../src/session-manager.js';
 import { createServer } from '../src/server.js';
@@ -33,7 +33,7 @@ before(async () => {
     current: () => { if (snapshotFails) throw new Error('boom'); return snapshot; },
     subscribe: (cb) => { snapshotSubs.add(cb); return () => snapshotSubs.delete(cb); },
   };
-  server = createServer({ manager, poller, token: TOKEN, port: 0, uploadsDir: join(dir, 'uploads'), find: async (name) => found[name] ?? [], log: (line) => logLines.push(line) });
+  server = createServer({ manager, poller, token: TOKEN, port: 0, uploadsDir: relative(process.cwd(), join(dir, 'uploads')), find: async (name) => found[name] ?? [], log: (line) => logLines.push(line) });
   await once(server, 'listening');
   port = server.address().port;
 });
@@ -322,6 +322,7 @@ test('POST /api/upload saves a file for a live session under a sanitized name an
     body: data,
   });
   assert.equal(res.status, 201);
+  assert.equal(isAbsolute(res.json.path), true);
   assert.match(res.json.path, /uploads\/\d+-[0-9a-f]{8}-my_report__1_.pdf$/);
   assert.deepEqual(readFileSync(res.json.path), data);
   assert.equal(statSync(res.json.path).mode & 0o777, 0o600);
@@ -376,4 +377,25 @@ test('POST /api/locate returns the original path only when size and modified tim
   assert.equal((await ask({ ...good, name: '../notes.txt' })).status, 400);
   assert.equal((await ask({ name: 'notes.txt' })).status, 400);
   assert.equal((await ask(good, {})).status, 401);
+});
+
+test('POST /api/locate falls back to upload when matching originals are ambiguous', async () => {
+  const firstDir = join(dir, 'first');
+  const secondDir = join(dir, 'second');
+  mkdirSync(firstDir);
+  mkdirSync(secondDir);
+  const first = join(firstDir, 'ambiguous.txt');
+  const second = join(secondDir, 'ambiguous.txt');
+  writeFileSync(first, 'hello');
+  writeFileSync(second, 'WRONG');
+  const when = new Date('2026-01-02T03:04:05Z');
+  utimesSync(first, when, when);
+  utimesSync(second, when, new Date(when.getTime() + 1000));
+  found['ambiguous.txt'] = [first, second];
+  const res = await request('/api/locate', {
+    method: 'POST', headers: auth,
+    body: { name: 'ambiguous.txt', size: 5, lastModified: when.getTime() },
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.json, { path: null });
 });

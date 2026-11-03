@@ -217,6 +217,7 @@ function rejectUpgrade(socket, status, reason) {
  * through `log`.
  */
 export function createServer({ manager, poller, token, port = PORT, uploadsDir = UPLOADS_DIR, find = spotlightFind, log = console.error }) {
+  uploadsDir = resolve(uploadsDir);
   const wss = new WebSocketServer({ noServer: true, maxPayload: BODY_MAX });
   const eventClients = new Set();
 
@@ -357,8 +358,7 @@ export function createServer({ manager, poller, token, port = PORT, uploadsDir =
           matches.push({ candidate, mtimeMs: stat.mtimeMs });
         }
       }
-      matches.sort((a, b) => b.mtimeMs - a.mtimeMs);
-      return sendJson(res, 200, { path: matches[0]?.candidate ?? null });
+      return sendJson(res, 200, { path: matches.length === 1 ? matches[0].candidate : null });
     }
 
     if (path === '/api/upload' && req.method === 'POST') {

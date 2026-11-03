@@ -100,6 +100,20 @@ test('focus reports from the browser terminal are forwarded but keep the session
   assert.equal(mgr.live(id).screenWaiting, false);
 });
 
+// xterm.js answers the colour and device-attribute queries in replayed
+// scrollback when a session's terminal is opened in the browser.
+test('replies xterm.js sends to terminal queries keep the session waiting', () => {
+  const { dir, fake, mgr } = setup();
+  const { id } = mgr.start({ name: 's', cwd: dir });
+  fake.calls[0].pty.emit('Do you want to proceed?\n');
+  mgr.write(id, '\x1b]11;rgb:0000/0000/0000\x1b\\');
+  mgr.write(id, '\x1b[?1;2c');
+  mgr.write(id, '\x1b[12;40R');
+  assert.equal(mgr.live(id).screenWaiting, true);
+  mgr.write(id, '\x1b[B');
+  assert.equal(mgr.live(id).screenWaiting, false);
+});
+
 test('exit records endedAt and exitCode, emits change; dismiss removes ended only', () => {
   const { dir, fake, mgr } = setup();
   const { id } = mgr.start({ name: 's', cwd: dir });

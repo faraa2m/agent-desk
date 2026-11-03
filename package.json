@@ -14,5 +14,18 @@
     "@xterm/xterm": "^6.0.0",
     "node-pty": "^1.1.0",
     "ws": "^8.22.1"
+  },
+  "description": "One browser tab to see, switch between and answer your Claude Code sessions",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/faraa2m/agent-desk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/faraa2m/agent-desk/issues"
+  },
+  "homepage": "https://github.com/faraa2m/agent-desk#readme",
+  "engines": {
+    "node": ">=22"
   }
 }

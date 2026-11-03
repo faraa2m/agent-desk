@@ -4,10 +4,14 @@ const TAIL_LIMIT = 4096;
 const CARRY_LIMIT = 4096;
 
 const PROMPT_PATTERNS = [
-  /Do you want to (proceed|make this edit|create|run|allow)/i,
-  /Enter to select/,
+  /Do\s+you\s+want\s+to\s+(proceed|make\s+this\s+edit|create|run|allow)/i,
+  /Enter\s+to\s+(select|confirm)/,
   /❯\s*1\.\s+Yes/,
 ];
+
+// CSI final bytes that move the cursor sideways or to a new position. Claude
+// Code lays out words with these instead of spaces, so each counts as a gap.
+const CURSOR_MOVES = new Set(['C', 'G', 'H', 'f', '`', 'a']);
 
 const ANSI_PATTERN = new RegExp(
   [
@@ -68,6 +72,7 @@ export class ScreenWatcher {
         if (rest.length <= CARRY_LIMIT) this.#carry = rest;
         break;
       }
+      if (s[i + 1] === '[' && CURSOR_MOVES.has(s[end - 1])) text += ' ';
       i = end;
     }
 

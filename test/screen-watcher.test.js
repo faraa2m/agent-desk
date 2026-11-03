@@ -136,3 +136,19 @@ test('only the last 4096 characters are kept', () => {
   w.feed('x'.repeat(5000));
   assert.equal(w.waiting, false);
 });
+
+// Claude Code positions words with cursor-movement sequences instead of
+// spaces; these fragments are its real output.
+test('workspace trust dialog laid out with cursor moves sets waiting', () => {
+  const w = new ScreenWatcher();
+  w.feed('\x1b[2G\x1b[38;2;177;185;249m❯\x1b[4GNo,\x1b[8Gexit\x1b[39m\r\r\n'
+    + '\x1b[4GYes,\x1b[9GI\x1b[11Gtrust\x1b[17Gthis\x1b[22Gfolder\r\r\n\r\r\n'
+    + '\x1b[2G\x1b[38;2;153;153;153mEnter\x1b[8Gto\x1b[11Gconfirm\x1b[19G·\x1b[21GEsc\x1b[25Gto\x1b[28Gcancel\x1b[39m\r\r\n');
+  assert.equal(w.waiting, true);
+});
+
+test('permission question laid out with cursor moves sets waiting', () => {
+  const w = new ScreenWatcher();
+  w.feed('\r\x1b[1C\x1b[1B\x1b[39mDo\x1b[5Gyou\x1b[9Gwant\x1b[14Gto\x1b[17Gcreate\x1b[24G\x1b[1mad-e2e-2.txt\x1b[22m?');
+  assert.equal(w.waiting, true);
+});

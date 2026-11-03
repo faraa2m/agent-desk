@@ -40,6 +40,8 @@ export async function serve() {
   try {
     await once(server, 'listening');
   } catch (err) {
+    // The poller's timer would otherwise keep the process alive without a server.
+    poller.stop();
     log(`listen failed: ${err.message}`);
     throw err;
   }

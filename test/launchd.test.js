@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdtempSync, readFileSync, readlinkSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { installLogin, plistFor, uninstallLogin } from '../src/launchd.js';
+import { installLogin, launchPath, plistFor, uninstallLogin } from '../src/launchd.js';
 
 const args = {
   nodePath: '/opt/node/bin/node',
@@ -64,4 +64,48 @@ test('uninstallLogin boots out and deletes the plist', () => {
   uninstallLogin(opts);
   assert.deepEqual(calls, [['launchctl', 'bootout', 'gui/501', plist]]);
   assert.equal(existsSync(plist), false);
+});
+
+test('launchPath drops fnm_multishells entries and puts the node dir first once', () => {
+  const path = launchPath(
+    '/Users/x/.local/state/fnm_multishells/123_456/bin:/usr/local/bin:/opt/node/bin:/usr/bin::/usr/local/bin',
+    '/opt/node/bin',
+  );
+  assert.equal(path, '/opt/node/bin:/usr/local/bin:/usr/bin');
+});
+
+test('plistFor sets LANG and SHELL', () => {
+  const plist = plistFor({ ...args, lang: 'de_DE.UTF-8', shell: '/bin/bash' });
+  assert.match(plist, /<key>LANG<\/key>\s*<string>de_DE\.UTF-8<\/string>/);
+  assert.match(plist, /<key>SHELL<\/key>\s*<string>\/bin\/bash<\/string>/);
+  execFileSync('plutil', ['-lint', '-'], { input: plist });
+});
+
+test('installLogin resolves a per-shell node to its stable install and builds the env', () => {
+  const { home, opts } = tempEnv();
+  const stable = join(home, 'fnm', 'node-versions', 'v24', 'installation', 'bin');
+  const shell = join(home, 'fnm_multishells', '999_1');
+  mkdirSync(stable, { recursive: true });
+  writeFileSync(join(stable, 'node'), '');
+  mkdirSync(join(home, 'fnm_multishells'), { recursive: true });
+  symlinkSync(join(stable, '..'), shell);
+  delete opts.nodePath;
+  opts.execPath = join(shell, 'bin', 'node');
+  opts.pathEnv = `${join(shell, 'bin')}:/usr/bin:/bin`;
+  opts.env = {};
+  const plist = readFileSync(installLogin(opts), 'utf8');
+  const real = realpathSync(stable);
+  assert.match(plist, new RegExp(`<string>${real}/node</string>`));
+  assert.match(plist, new RegExp(`<key>PATH</key>\\s*<string>${real}:/usr/bin:/bin</string>`));
+  assert.ok(!plist.includes('fnm_multishells'));
+  assert.match(plist, /<key>LANG<\/key>\s*<string>en_US\.UTF-8<\/string>/);
+  assert.match(plist, /<key>SHELL<\/key>\s*<string>\/bin\/zsh<\/string>/);
+});
+
+test('installLogin takes LANG and SHELL from the environment', () => {
+  const { opts } = tempEnv();
+  opts.env = { LANG: 'fr_FR.UTF-8', SHELL: '/opt/homebrew/bin/fish' };
+  const plist = readFileSync(installLogin(opts), 'utf8');
+  assert.match(plist, /<key>LANG<\/key>\s*<string>fr_FR\.UTF-8<\/string>/);
+  assert.match(plist, /<key>SHELL<\/key>\s*<string>\/opt\/homebrew\/bin\/fish<\/string>/);
 });

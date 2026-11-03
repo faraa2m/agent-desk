@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,8 +12,19 @@ function xmlEscape(text) {
   return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+/**
+ * The PATH for the LaunchAgent: `nodeDir` first, then the entries of
+ * `pathEnv` without duplicates, empties or fnm per-shell directories
+ * (`fnm_multishells`), which vanish once their shell exits.
+ */
+export function launchPath(pathEnv, nodeDir) {
+  const entries = [nodeDir, ...String(pathEnv ?? '').split(':')];
+  const kept = entries.filter((p) => p !== '' && !p.includes('fnm_multishells'));
+  return [...new Set(kept)].join(':');
+}
+
 /** The LaunchAgent plist that runs `agent-desk serve` at login and keeps it alive. */
-export function plistFor({ nodePath, scriptPath, pathEnv, home, logPath }) {
+export function plistFor({ nodePath, scriptPath, pathEnv, home, logPath, lang = 'en_US.UTF-8', shell = '/bin/zsh' }) {
   const s = (v) => `<string>${xmlEscape(v)}</string>`;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -35,6 +46,10 @@ export function plistFor({ nodePath, scriptPath, pathEnv, home, logPath }) {
     ${s(pathEnv)}
     <key>HOME</key>
     ${s(home)}
+    <key>LANG</key>
+    ${s(lang)}
+    <key>SHELL</key>
+    ${s(shell)}
   </dict>
   <key>StandardOutPath</key>
   ${s(logPath)}
@@ -47,6 +62,10 @@ export function plistFor({ nodePath, scriptPath, pathEnv, home, logPath }) {
 
 function defaults(opts) {
   const home = opts.home ?? homedir();
+  const env = opts.env ?? process.env;
+  // Under fnm, process.execPath can sit in a per-shell directory; the real
+  // path is the stable installation that survives a reboot.
+  const nodePath = opts.nodePath ?? realpathSync(opts.execPath ?? process.execPath);
   return {
     home,
     uid: opts.uid ?? process.getuid(),
@@ -54,8 +73,10 @@ function defaults(opts) {
     plistFile: opts.plistFile ?? join(home, 'Library', 'LaunchAgents', `${LABEL}.plist`),
     linkFile: opts.linkFile ?? join(home, '.claude', 'bin', 'agent-desk'),
     scriptPath: opts.scriptPath ?? SCRIPT_PATH,
-    nodePath: opts.nodePath ?? process.execPath,
-    pathEnv: opts.pathEnv ?? process.env.PATH ?? '',
+    nodePath,
+    pathEnv: launchPath(opts.pathEnv ?? env.PATH ?? '', dirname(nodePath)),
+    lang: env.LANG || 'en_US.UTF-8',
+    shell: env.SHELL || '/bin/zsh',
     logPath: opts.logPath ?? LOG_FILE,
   };
 }
@@ -88,7 +109,13 @@ export function installLogin(opts = {}) {
   mkdirSync(dirname(d.plistFile), { recursive: true });
   mkdirSync(dirname(d.logPath), { recursive: true, mode: 0o700 });
   writeFileSync(d.plistFile, plistFor({
-    nodePath: d.nodePath, scriptPath: d.scriptPath, pathEnv: d.pathEnv, home: d.home, logPath: d.logPath,
+    nodePath: d.nodePath,
+    scriptPath: d.scriptPath,
+    pathEnv: d.pathEnv,
+    home: d.home,
+    logPath: d.logPath,
+    lang: d.lang,
+    shell: d.shell,
   }));
   ensureLink(d.linkFile, d.scriptPath);
   bootout(d.run, d.uid, d.plistFile);

@@ -27,8 +27,10 @@ export function detectPrompt(text) {
   return PROMPT_PATTERNS.some((re) => re.test(text));
 }
 
+// OSC 9;4 is the terminal progress-bar sequence, not a notification.
 function isNotificationOsc(body) {
-  return body.startsWith('9;') || body.startsWith('777;');
+  if (body.startsWith('9;')) return !/^9;4(;|$)/.test(body);
+  return body.startsWith('777;');
 }
 
 /**

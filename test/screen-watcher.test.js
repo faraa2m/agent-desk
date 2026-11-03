@@ -102,7 +102,31 @@ test('split ESC ] introducer and split ST terminator', () => {
 test('split CSI sequence does not leak into text', () => {
   const w = new ScreenWatcher();
   w.feed('Do you want to \x1b[3');
+  assert.equal(w.waiting, false);
   w.feed('1mproceed?\x1b[0m');
+  // A leaked "[3" or "31m" fragment would break the phrase and leave waiting false.
+  assert.equal(w.waiting, true);
+});
+
+test('split CSI parameters are not treated as visible text', () => {
+  const w = new ScreenWatcher();
+  w.feed('Enter to sel\x1b[3');
+  w.feed('8;5;2mect');
+  assert.equal(w.waiting, true);
+});
+
+test('OSC 9;4 progress sequences do not set waiting', () => {
+  const a = new ScreenWatcher();
+  a.feed('\x1b]9;4;1;50\x07');
+  assert.equal(a.waiting, false);
+  const b = new ScreenWatcher();
+  b.feed('\x1b]9;4;0\x1b\\');
+  assert.equal(b.waiting, false);
+});
+
+test('OSC 9 body that merely starts with 4 still notifies', () => {
+  const w = new ScreenWatcher();
+  w.feed('\x1b]9;44 files changed\x07');
   assert.equal(w.waiting, true);
 });
 

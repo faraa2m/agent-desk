@@ -42,7 +42,7 @@ export function buildSnapshot({
 
     const entry = !exited && sessionId ? scan.find((e) => e.session_id === sessionId) : undefined;
     const scanWaiting = entry?.waiting === true;
-    const screenWaiting = liveInfo?.screenWaiting === true;
+    const screenWaiting = liveInfo?.screenWaiting === true || meta?.status === 'waiting';
     const waiting = !exited && (scanWaiting || screenWaiting);
     const key = scanWaiting ? entry.text_hash : 'screen';
     const waitingSince = waitTracker.update(rec.id, waiting, key, now);

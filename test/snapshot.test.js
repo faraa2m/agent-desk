@@ -87,6 +87,19 @@ test('screen-only waiting uses the generic question; not waiting has no question
   assert.equal(busy.status, 'working');
 });
 
+test('the session file reporting waiting needs you without a scan entry or screen signal', () => {
+  const waitingMeta = (pid) => (pid === 501 ? { sessionId: 'sid-1', status: 'waiting', name: 'worker', cwd: '/w' } : null);
+  const [view] = buildSnapshot(input({ scan: [], metaFor: waitingMeta }));
+  assert.equal(view.status, 'needs-you');
+  assert.equal(view.question, 'Waiting for your input');
+  assert.equal(view.waitingSince, NOW);
+});
+
+test('the session file reporting idle with no waiting signal is done', () => {
+  const [view] = buildSnapshot(input({ scan: [] }));
+  assert.equal(view.status, 'done');
+});
+
 test('long questions are cut to 160 characters', () => {
   const scan = [{ session_id: 'sid-1', waiting: true, text_hash: 'h', question: 'q'.repeat(300) }];
   const [view] = buildSnapshot(input({ scan }));

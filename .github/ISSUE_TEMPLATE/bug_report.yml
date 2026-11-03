@@ -1,0 +1,25 @@
+name: Bug report
+description: Report a reproducible problem
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: "Remove tokens, prompts, and private terminal content. Report vulnerabilities using SECURITY.md."
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: macOS version, Node.js version, and Agent Desk commit
+    validations:
+      required: true

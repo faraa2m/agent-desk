@@ -72,9 +72,9 @@ async function open() {
     console.error('agent-desk token not found');
     return 1;
   }
-  const url = `${BASE}/?key=${token}`;
-  console.log(`Open: ${url}`);
-  execFileSync('/usr/bin/open', [url]);
+  // The keyed URL goes only to the browser; the terminal never shows the token.
+  console.log(`Opening agent-desk at ${BASE}/`);
+  execFileSync('/usr/bin/open', [`${BASE}/?key=${token}`]);
   return 0;
 }
 

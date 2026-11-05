@@ -52,6 +52,12 @@ test('the spawned env does not carry the terminal that started the server', () =
   assert.equal(env.PATH, process.env.PATH);
 });
 
+test('start passes --model before the brief', () => {
+  const { dir, fake, mgr } = setup();
+  mgr.start({ name: 'm', cwd: dir, model: 'sonnet', brief: 'go' });
+  assert.deepEqual(fake.calls[0].args, ['-n', 'm', '--model', 'sonnet', '--', 'go']);
+});
+
 test('start without agent or brief passes only the name; goal is cut to 120 chars', () => {
   const { dir, fake, mgr } = setup();
   mgr.start({ name: 'a', cwd: dir });

@@ -97,20 +97,22 @@ async function open() {
 function parseLaunch(args) {
   const rest = [];
   let agent = null;
+  let model = null;
   let briefFile = null;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--agent') agent = args[++i];
+    else if (args[i] === '--model') model = args[++i];
     else if (args[i] === '--brief-file') briefFile = args[++i];
     else rest.push(args[i]);
   }
   const [name, dir, ...words] = rest;
-  return { name, dir, agent, briefFile, words };
+  return { name, dir, agent, model, briefFile, words };
 }
 
 async function launch(args) {
-  const { name, dir, agent, briefFile, words } = parseLaunch(args);
+  const { name, dir, agent, model, briefFile, words } = parseLaunch(args);
   if (!name || !dir) {
-    console.error('usage: agent-desk launch <name> <dir> [--agent <a>] (--brief-file <path> | <brief...>)');
+    console.error('usage: agent-desk launch <name> <dir> [--agent <a>] [--model <m>] (--brief-file <path> | <brief...>)');
     return 2;
   }
   let brief = words.join(' ');
@@ -125,7 +127,7 @@ async function launch(args) {
   const token = readToken();
   let res;
   try {
-    res = await api('POST', '/api/sessions', token, { name, cwd: resolve(dir), agent: agent ?? undefined, brief });
+    res = await api('POST', '/api/sessions', token, { name, cwd: resolve(dir), agent: agent ?? undefined, model: model ?? undefined, brief });
   } catch (err) {
     if (err instanceof Unreachable) return EXIT_UNREACHABLE;
     // Exit 1, not 3, so launch-session does not start the same session elsewhere.

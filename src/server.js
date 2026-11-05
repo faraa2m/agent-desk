@@ -328,6 +328,7 @@ export function createServer({ manager, poller, token, port = PORT, uploadsDir =
           name: body.name,
           cwd: body.cwd,
           agent: typeof body.agent === 'string' && body.agent.trim() ? body.agent.trim() : null,
+          model: typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null,
           brief: typeof body.brief === 'string' ? body.brief : '',
         });
       } catch (err) {

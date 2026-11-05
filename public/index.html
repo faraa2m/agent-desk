@@ -18,7 +18,9 @@
   <form id="new-form" hidden autocomplete="off">
     <label>Name <input id="nf-name" required></label>
     <label>Folder <input id="nf-cwd" required placeholder="~/Documents/dev/my-repo"></label>
-    <label>Agent (optional) <input id="nf-agent"></label>
+    <label>Agent (optional) <input id="nf-agent" list="nf-agents" placeholder="e.g. merge-lead"></label>
+    <datalist id="nf-agents"></datalist>
+    <p id="nf-agent-desc" class="hint" hidden></p>
     <label>First prompt <textarea id="nf-brief" rows="4"></textarea></label>
     <div class="row">
       <button type="submit" id="nf-submit">Start</button>

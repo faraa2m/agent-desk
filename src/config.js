@@ -15,6 +15,7 @@ export const UPLOADS_DIR = join(STATE_DIR, 'uploads');
 export const LOG_FILE = join(STATE_DIR, 'server.log');
 export const CLAUDE_SESSIONS_DIR = expandHome('~/.claude/sessions');
 export const SCANNER_SCRIPT = expandHome('~/.claude/skills/team-lead/scripts/scan_sessions.py');
+export const AGENTS_DIR = expandHome('~/.claude/agents');
 export const LEDGER_FILE = expandHome('~/.claude/team-lead/ledger.jsonl');
 export const GRACE_MS = 120000;
 export const POLL_MS = 3000;

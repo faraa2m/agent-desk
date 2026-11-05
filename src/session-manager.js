@@ -162,7 +162,7 @@ export class SessionManager extends EventEmitter {
     });
   }
 
-  start({ name, cwd, agent = null, brief = '' }) {
+  start({ name, cwd, agent = null, model = null, brief = '' }) {
     if (typeof name !== 'string' || name.trim() === '') throw fail('BAD_NAME', 'Name is required');
     const dir = expandHome(cwd ?? '');
     if (!cwd || !isDirectory(dir)) throw fail('NO_DIR', `Not a directory: ${cwd}`);
@@ -184,7 +184,7 @@ export class SessionManager extends EventEmitter {
     this.#records.set(rec.id, rec);
     this.#scrollbacks.set(rec.id, new Scrollback());
     // `--` ends option parsing, so a brief that starts with `-` stays the prompt.
-    const args = ['-n', name, ...(agent ? ['--agent', agent] : []), ...(brief ? ['--', brief] : [])];
+    const args = ['-n', name, ...(agent ? ['--agent', agent] : []), ...(model ? ['--model', model] : []), ...(brief ? ['--', brief] : [])];
     try {
       this.#launch(rec, args);
     } catch (err) {

@@ -5,7 +5,8 @@ import { createReadStream, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { PORT, UPLOADS_DIR } from './config.js';
+import { AGENTS_DIR, PORT, UPLOADS_DIR } from './config.js';
+import { listAgents } from './agents.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC_DIR = join(ROOT, 'public');
@@ -216,7 +217,7 @@ function rejectUpgrade(socket, status, reason) {
  * `key`, `ad_key` cookie or bearer). Calls that change sessions are logged
  * through `log`.
  */
-export function createServer({ manager, poller, token, port = PORT, uploadsDir = UPLOADS_DIR, find = spotlightFind, log = console.error }) {
+export function createServer({ manager, poller, token, port = PORT, uploadsDir = UPLOADS_DIR, agentsDir = AGENTS_DIR, find = spotlightFind, log = console.error }) {
   uploadsDir = resolve(uploadsDir);
   const wss = new WebSocketServer({ noServer: true, maxPayload: BODY_MAX });
   const eventClients = new Set();
@@ -317,6 +318,7 @@ export function createServer({ manager, poller, token, port = PORT, uploadsDir =
         return sendFile(res, file);
       }
       if (path === '/api/sessions') return sendJson(res, 200, poller.current());
+      if (path === '/api/agents') return sendJson(res, 200, listAgents(agentsDir));
     }
 
     if (path === '/api/sessions' && req.method === 'POST') {
@@ -328,6 +330,7 @@ export function createServer({ manager, poller, token, port = PORT, uploadsDir =
           name: body.name,
           cwd: body.cwd,
           agent: typeof body.agent === 'string' && body.agent.trim() ? body.agent.trim() : null,
+          model: typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null,
           brief: typeof body.brief === 'string' ? body.brief : '',
         });
       } catch (err) {

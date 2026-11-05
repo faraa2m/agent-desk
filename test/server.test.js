@@ -33,7 +33,10 @@ before(async () => {
     current: () => { if (snapshotFails) throw new Error('boom'); return snapshot; },
     subscribe: (cb) => { snapshotSubs.add(cb); return () => snapshotSubs.delete(cb); },
   };
-  server = createServer({ manager, poller, token: TOKEN, port: 0, uploadsDir: relative(process.cwd(), join(dir, 'uploads')), find: async (name) => found[name] ?? [], log: (line) => logLines.push(line) });
+  const agentsDir = join(dir, 'agents');
+  mkdirSync(agentsDir);
+  writeFileSync(join(agentsDir, 'merge-lead.md'), '---\nname: merge-lead\ndescription: Merges.\n---\n');
+  server = createServer({ manager, poller, token: TOKEN, port: 0, agentsDir, uploadsDir: relative(process.cwd(), join(dir, 'uploads')), find: async (name) => found[name] ?? [], log: (line) => logLines.push(line) });
   await once(server, 'listening');
   port = server.address().port;
 });
@@ -94,6 +97,13 @@ test('health needs no token', async () => {
   const res = await request('/api/health');
   assert.equal(res.status, 200);
   assert.deepEqual(res.json, { ok: true });
+});
+
+test('GET /api/agents lists agent definitions and needs the token', async () => {
+  assert.equal((await request('/api/agents')).status, 401);
+  const res = await request('/api/agents', { headers: { authorization: `Bearer ${TOKEN}` } });
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.json, [{ name: 'merge-lead', description: 'Merges.' }]);
 });
 
 test('sessions without a token or with a wrong one is 401', async () => {

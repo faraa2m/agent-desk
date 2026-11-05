@@ -466,11 +466,56 @@ function connectEvents() {
 const form = $('new-form');
 const formError = $('nf-error');
 
+// Agents from ~/.claude/agents, offered as suggestions in the Agent field.
+let agents = [];
+let autoName = '';
+
+async function loadAgents() {
+  try {
+    agents = await api('GET', '/api/agents');
+  } catch {
+    agents = [];
+  }
+  $('nf-agents').replaceChildren(...agents.map((a) => {
+    const opt = document.createElement('option');
+    opt.value = a.name;
+    opt.label = a.description;
+    return opt;
+  }));
+}
+
+// Shows the chosen agent's description and, while the name is empty or still
+// the one suggested here, suggests `<agent>-<folder>` so per-repo agents such
+// as merge-lead get distinct names.
+function onAgentOrFolderChange() {
+  const agent = agents.find((a) => a.name === $('nf-agent').value.trim());
+  const desc = $('nf-agent-desc');
+  desc.textContent = agent?.description ?? '';
+  desc.hidden = !agent?.description;
+  const nameInput = $('nf-name');
+  if (nameInput.value.trim() && nameInput.value !== autoName) return;
+  const folder = $('nf-cwd').value.trim().replace(/\/+$/, '').split('/').pop();
+  autoName = agent && folder && folder !== '~' ? `${agent.name}-${folder}` : '';
+  nameInput.value = autoName;
+}
+$('nf-agent').addEventListener('input', onAgentOrFolderChange);
+$('nf-cwd').addEventListener('input', onAgentOrFolderChange);
+
 $('new-btn').addEventListener('click', () => {
   form.hidden = !form.hidden;
-  if (!form.hidden) $('nf-name').focus();
+  if (!form.hidden) {
+    loadAgents();
+    $('nf-name').focus();
+  }
 });
+function resetForm() {
+  form.reset();
+  autoName = '';
+  $('nf-agent-desc').hidden = true;
+}
+
 $('nf-cancel').addEventListener('click', () => {
+  resetForm();
   form.hidden = true;
   formError.hidden = true;
 });
@@ -485,7 +530,7 @@ form.addEventListener('submit', async (e) => {
       agent: $('nf-agent').value.trim(),
       brief: $('nf-brief').value,
     });
-    form.reset();
+    resetForm();
     form.hidden = true;
     if (rec?.id) {
       if (!sessionById(rec.id)) sessions = [...sessions, { ...rec, status: 'working', color: rec.color ?? '#3b82f6' }];

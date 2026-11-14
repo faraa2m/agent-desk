@@ -1,3 +1,5 @@
+import { attachCombobox } from './combobox.js';
+
 const STATUS_LABEL = {
   'needs-you': 'NEEDS YOU',
   'team-lead': 'TEAM-LEAD HANDLING',
@@ -466,9 +468,16 @@ function connectEvents() {
 const form = $('new-form');
 const formError = $('nf-error');
 
-// Agents from ~/.claude/agents, offered as suggestions in the Agent field.
+// Agents from ~/.claude/agents, offered in the Agent field's dropdown.
 let agents = [];
 let autoName = '';
+
+const agentCombo = attachCombobox({
+  input: $('nf-agent'),
+  toggle: $('nf-agent-toggle'),
+  listbox: $('nf-agent-list'),
+  getOptions: () => agents,
+});
 
 async function loadAgents() {
   try {
@@ -476,12 +485,7 @@ async function loadAgents() {
   } catch {
     agents = [];
   }
-  $('nf-agents').replaceChildren(...agents.map((a) => {
-    const opt = document.createElement('option');
-    opt.value = a.name;
-    opt.label = a.description;
-    return opt;
-  }));
+  agentCombo.refresh();
 }
 
 // Shows the chosen agent's description and, while the name is empty or still

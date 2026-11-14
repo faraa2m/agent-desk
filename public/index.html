@@ -18,8 +18,14 @@
   <form id="new-form" hidden autocomplete="off">
     <label>Name <input id="nf-name" required></label>
     <label>Folder <input id="nf-cwd" required placeholder="~/Documents/dev/my-repo"></label>
-    <label>Agent (optional) <input id="nf-agent" list="nf-agents" placeholder="e.g. merge-lead"></label>
-    <datalist id="nf-agents"></datalist>
+    <div class="field">
+      <label for="nf-agent">Agent (optional)</label>
+      <div class="combo">
+        <input id="nf-agent" placeholder="Search or type an agent">
+        <button type="button" id="nf-agent-toggle" class="combo-toggle" tabindex="-1" aria-label="Show agents">▾</button>
+        <ul id="nf-agent-list" class="combo-list" hidden></ul>
+      </div>
+    </div>
     <p id="nf-agent-desc" class="hint" hidden></p>
     <label>First prompt <textarea id="nf-brief" rows="4"></textarea></label>
     <div class="row">

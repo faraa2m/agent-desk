@@ -9,6 +9,13 @@ import { ScreenWatcher } from './screen-watcher.js';
 const COLS = 120;
 const ROWS = 40;
 const GOAL_MAX = 120;
+const NAME_MAX = 80;
+// Control characters, which would garble the list and the terminal title.
+const CONTROL = /[\x00-\x1f\x7f]/;
+// Model ids: no whitespace and no leading dash, so the value cannot be read as
+// a claude CLI option.
+const MODEL_VALUE = /^[A-Za-z0-9_.:@\/\[\]][A-Za-z0-9_.:@\/\[\]-]*$/;
+const OPTION_VALUE_MAX = 100;
 // Reports a terminal sends on its own rather than from a keystroke: focus
 // in/out, OSC replies (e.g. background colour), DCS replies, device
 // attributes and cursor position.
@@ -35,6 +42,16 @@ function isUserInput(data) {
 
 function fail(code, message) {
   return Object.assign(new Error(message), { code });
+}
+
+function validModel(value) {
+  return value === null || (typeof value === 'string' && value.length <= OPTION_VALUE_MAX && MODEL_VALUE.test(value));
+}
+
+// Agent names follow whatever ~/.claude/agents defines, spaces included; only
+// a leading dash (read as an option) and control characters are refused.
+function validAgent(value) {
+  return value === null || (typeof value === 'string' && value.length <= OPTION_VALUE_MAX && !value.startsWith('-') && !CONTROL.test(value));
 }
 
 function firstLine(text) {
@@ -92,6 +109,7 @@ export class SessionManager extends EventEmitter {
         name: rec.name ?? '',
         cwd: rec.cwd ?? '',
         agent: rec.agent ?? null,
+        model: rec.model ?? null,
         goal: rec.goal ?? '',
         claudeSessionId: rec.claudeSessionId ?? null,
         pid: null,
@@ -106,7 +124,7 @@ export class SessionManager extends EventEmitter {
     const dir = dirname(this.#stateFile);
     const tmp = join(dir, `.sessions.${process.pid}.${randomBytes(4).toString('hex')}.tmp`);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(tmp, JSON.stringify(this.list(), null, 2));
+    writeFileSync(tmp, JSON.stringify(this.list(), null, 2), { mode: 0o600 });
     renameSync(tmp, this.#stateFile);
   }
 
@@ -164,6 +182,10 @@ export class SessionManager extends EventEmitter {
 
   start({ name, cwd, agent = null, model = null, brief = '' }) {
     if (typeof name !== 'string' || name.trim() === '') throw fail('BAD_NAME', 'Name is required');
+    name = name.trim();
+    if (name.length > NAME_MAX || CONTROL.test(name)) throw fail('BAD_NAME', `Name must be at most ${NAME_MAX} characters, without control characters`);
+    if (!validAgent(agent)) throw fail('BAD_AGENT', `Not a valid agent name: ${agent}`);
+    if (!validModel(model)) throw fail('BAD_MODEL', `Not a valid model: ${model}`);
     const dir = expandHome(cwd ?? '');
     if (!cwd || !isDirectory(dir)) throw fail('NO_DIR', `Not a directory: ${cwd}`);
     for (const [id] of this.#live) {
@@ -174,6 +196,7 @@ export class SessionManager extends EventEmitter {
       name,
       cwd: dir,
       agent,
+      model,
       goal: firstLine(brief),
       claudeSessionId: null,
       pid: null,
@@ -205,7 +228,7 @@ export class SessionManager extends EventEmitter {
     }
     if (!isDirectory(rec.cwd)) throw fail('NO_DIR', `Not a directory: ${rec.cwd}`);
     if (!this.#scrollbacks.has(id)) this.#scrollbacks.set(id, new Scrollback());
-    this.#launch(rec, ['--resume', rec.claudeSessionId, '-n', rec.name]);
+    this.#launch(rec, ['--resume', rec.claudeSessionId, '-n', rec.name, ...(rec.model ? ['--model', rec.model] : [])]);
     this.#changed();
     return { ...rec };
   }
@@ -226,7 +249,7 @@ export class SessionManager extends EventEmitter {
   }
 
   setGoal(id, goal) {
-    this.#require(id).goal = String(goal ?? '');
+    this.#require(id).goal = String(goal ?? '').replace(/[\x00-\x1f\x7f]+/g, ' ').trim().slice(0, GOAL_MAX);
     this.#changed();
   }
 

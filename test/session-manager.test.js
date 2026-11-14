@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, mkdirSync, statSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { SessionManager } from '../src/session-manager.js';
@@ -202,7 +202,7 @@ test('list returns plain copies; setGoal and setClaudeSessionId update and persi
   assert.equal(saved[0].goal, 'ship it');
   assert.equal(saved[0].claudeSessionId, 'sid-1');
   assert.deepEqual(Object.keys(saved[0]).sort(), [
-    'agent', 'claudeSessionId', 'createdAt', 'cwd', 'endedAt', 'exitCode', 'goal', 'id', 'name', 'pid',
+    'agent', 'claudeSessionId', 'createdAt', 'cwd', 'endedAt', 'exitCode', 'goal', 'id', 'model', 'name', 'pid',
   ]);
 });
 
@@ -273,4 +273,39 @@ test('corrupt state file is ignored', () => {
   const fake = makeFakeSpawn();
   const mgr = new SessionManager({ stateFile, spawn: fake.spawn });
   assert.deepEqual(mgr.list(), []);
+});
+
+test('start trims the name and rejects control characters and option-like agent or model values', () => {
+  const { dir, mgr } = setup();
+  assert.equal(mgr.start({ name: '  spaced  ', cwd: dir }).name, 'spaced');
+  assert.throws(() => mgr.start({ name: 'a\x1b[31m', cwd: dir }), { code: 'BAD_NAME' });
+  assert.throws(() => mgr.start({ name: 'x'.repeat(81), cwd: dir }), { code: 'BAD_NAME' });
+  assert.throws(() => mgr.start({ name: 'ag', cwd: dir, agent: '--settings' }), { code: 'BAD_AGENT' });
+  assert.throws(() => mgr.start({ name: 'mo', cwd: dir, model: 'opus x' }), { code: 'BAD_MODEL' });
+  assert.doesNotThrow(() => mgr.start({ name: 'spaced-agent', cwd: dir, agent: 'my agent' }));
+  assert.doesNotThrow(() => mgr.start({ name: 'ok', cwd: dir, agent: 'merge-lead', model: 'claude-opus-5-5[1m]' }));
+});
+
+test('setGoal flattens control characters and caps the goal at 120 characters', () => {
+  const { dir, mgr } = setup();
+  const { id } = mgr.start({ name: 'g', cwd: dir });
+  mgr.setGoal(id, `  one\ntwo\x1b${'z'.repeat(200)}`);
+  const goal = mgr.get(id).goal;
+  assert.equal(goal.length, 120);
+  assert.ok(goal.startsWith('one two z'));
+});
+
+test('the state file is owner-only', () => {
+  const { dir, stateFile, mgr } = setup();
+  mgr.start({ name: 'perm', cwd: dir });
+  assert.equal(statSync(stateFile).mode & 0o777, 0o600);
+});
+
+test('resume keeps the model the session was started with, across a restart', () => {
+  const { dir, fake, mk, mgr } = setup();
+  const { id } = mgr.start({ name: 'opus-run', cwd: dir, model: 'opus' });
+  mgr.setClaudeSessionId(id, 'sid-m');
+  const mgr2 = mk();
+  mgr2.resume(id);
+  assert.deepEqual(fake.calls[1].args, ['--resume', 'sid-m', '-n', 'opus-run', '--model', 'opus']);
 });

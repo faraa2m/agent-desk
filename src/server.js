@@ -43,6 +43,8 @@ const SIGN_IN_PAGE = `<!DOCTYPE html>
 `;
 const ERROR_STATUS = {
   BAD_NAME: 400,
+  BAD_AGENT: 400,
+  BAD_MODEL: 400,
   NO_DIR: 400,
   NAME_TAKEN: 409,
   NOT_FOUND: 404,
@@ -93,7 +95,29 @@ function sendHtml(res, status, html) {
   res.end(html);
 }
 
-function sendFile(res, file) {
+// Defense in depth for the page: no framing, no foreign scripts or
+// connections, no MIME sniffing and no referrer leaving the machine.
+function securityHeaders(res, port) {
+  res.setHeader('content-security-policy', [
+    "default-src 'self'",
+    "script-src 'self'",
+    // xterm.js adds <style> elements and inline styles for its renderer.
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    `connect-src 'self' ws://127.0.0.1:${port} ws://localhost:${port}`,
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join('; '));
+  res.setHeader('x-content-type-options', 'nosniff');
+  res.setHeader('x-frame-options', 'DENY');
+  res.setHeader('referrer-policy', 'no-referrer');
+  res.setHeader('cross-origin-opener-policy', 'same-origin');
+  res.setHeader('cross-origin-resource-policy', 'same-origin');
+}
+
+function sendFile(req, res, file) {
   let stat;
   try {
     stat = statSync(file);
@@ -104,10 +128,18 @@ function sendFile(res, file) {
     sendJson(res, 404, { error: 'Not found' });
     return;
   }
+  // Revalidated on every load, but answered with 304 while unchanged.
+  const etag = `W/"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
+  if (req.headers['if-none-match'] === etag) {
+    res.writeHead(304, { etag, 'cache-control': 'no-cache' });
+    res.end();
+    return;
+  }
   res.writeHead(200, {
     'content-type': CONTENT_TYPES[extname(file)] ?? 'application/octet-stream',
     'content-length': stat.size,
     'cache-control': 'no-cache',
+    etag,
   });
   createReadStream(file).on('error', () => res.destroy()).pipe(res);
 }
@@ -226,6 +258,7 @@ export function createServer({ manager, poller, token, port = PORT, uploadsDir =
     const pathname = parseUrl(req)?.pathname;
     const mutating = (req.method === 'POST' || req.method === 'PATCH') && pathname?.startsWith('/api/sessions');
     const audit = {};
+    securityHeaders(res, boundPort());
     if (mutating) res.on('finish', () => log(auditLine(req.method, pathname, audit, res.statusCode)));
     handle(req, res, audit).catch((err) => {
       if (err instanceof HttpError) {
@@ -304,18 +337,18 @@ export function createServer({ manager, poller, token, port = PORT, uploadsDir =
     }
 
     if (req.method === 'GET') {
-      if (path === '/') return sendFile(res, join(PUBLIC_DIR, 'index.html'));
+      if (path === '/') return sendFile(req, res, join(PUBLIC_DIR, 'index.html'));
       if (path.startsWith('/static/')) {
         const file = publicPath(path.slice('/static/'.length));
         if (!file) throw new HttpError(404, 'Not found');
-        return sendFile(res, file);
+        return sendFile(req, res, file);
       }
       if (path.startsWith('/vendor/')) {
         const file = Object.hasOwn(VENDOR_FILES, path.slice('/vendor/'.length))
           ? VENDOR_FILES[path.slice('/vendor/'.length)]
           : null;
         if (!file) throw new HttpError(404, 'Not found');
-        return sendFile(res, file);
+        return sendFile(req, res, file);
       }
       if (path === '/api/sessions') return sendJson(res, 200, poller.current());
       if (path === '/api/agents') return sendJson(res, 200, listAgents(agentsDir));
@@ -367,6 +400,17 @@ export function createServer({ manager, poller, token, port = PORT, uploadsDir =
     if (path === '/api/upload' && req.method === 'POST') {
       const id = url.searchParams.get('session');
       if (!id || !manager.get(id)) throw new HttpError(404, 'Session not found');
+      // Refuse before reading, so the browser gets the reason instead of a reset connection.
+      // The body is drained first: closing the socket on unread data would
+      // reach the browser as a reset connection.
+      if (Number(req.headers['content-length']) > UPLOAD_MAX) {
+        await new Promise((done) => {
+          req.on('end', done);
+          req.on('error', done);
+          req.resume();
+        });
+        throw new HttpError(413, `File too large (limit ${UPLOAD_MAX / 1024 / 1024} MB)`);
+      }
       const name = uploadName(req.headers['x-file-name']);
       const data = await readUpload(req);
       if (data.length === 0) throw new HttpError(400, 'Empty file');
@@ -477,8 +521,12 @@ export function createServer({ manager, poller, token, port = PORT, uploadsDir =
     });
   });
 
+  // The poller republishes every few seconds; only a changed snapshot is sent.
+  let lastMsg = null;
   const unsubscribe = poller.subscribe?.((sessions) => {
     const msg = JSON.stringify({ type: 'snapshot', sessions });
+    if (msg === lastMsg) return;
+    lastMsg = msg;
     for (const ws of eventClients) {
       if (ws.readyState === ws.OPEN) ws.send(msg);
     }

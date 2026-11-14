@@ -37,3 +37,12 @@ test('findEntry returns null for a null hash or no match', () => {
   assert.equal(findEntry(entries, 's', null), null);
   assert.equal(findEntry(entries, 'x', 'h'), null);
 });
+
+test('readLedger rereads the file once it changes', () => {
+  const file = join(mkdtempSync(join(tmpdir(), 'ledger-')), 'l.jsonl');
+  writeFileSync(file, '{"id":1}\n');
+  assert.deepEqual(readLedger(file), [{ id: 1 }]);
+  assert.deepEqual(readLedger(file), [{ id: 1 }]);
+  writeFileSync(file, '{"id":1}\n{"id":2}\n');
+  assert.deepEqual(readLedger(file), [{ id: 1 }, { id: 2 }]);
+});

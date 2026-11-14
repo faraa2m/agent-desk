@@ -8,6 +8,9 @@ const STATUS_LABEL = {
   ended: 'ENDED',
 };
 const BACKOFF_MS = [1000, 2000, 5000];
+// Terminals kept attached in the background for fast switching; the least
+// recently shown beyond this are closed and replayed from scrollback on return.
+const MAX_TERMINALS = 8;
 
 const $ = (id) => document.getElementById(id);
 const listEl = $('list');
@@ -15,6 +18,7 @@ const headerEl = $('session-header');
 const panesEl = $('panes');
 const emptyEl = $('empty');
 const connEl = $('conn');
+const toastEl = $('toast');
 
 // The ?key= sign-in link must not stay in the address bar or the history entry.
 if (location.search) history.replaceState(null, '', location.pathname + location.hash);
@@ -213,7 +217,7 @@ function ensureTerminal(id) {
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open(host);
-  entry = { id, term, fit, pane, notice, ws: null, attempt: 0, retryTimer: null, replaying: false };
+  entry = { id, term, fit, pane, notice, ws: null, attempt: 0, retryTimer: null, replaying: false, shownAt: Date.now() };
   term.onData((data) => {
     if (entry.replaying) return;
     if (entry.ws?.readyState === WebSocket.OPEN) entry.ws.send(JSON.stringify({ type: 'input', data }));
@@ -242,10 +246,20 @@ function disposeTerminal(id) {
   terminals.delete(id);
 }
 
+function trimTerminals() {
+  if (terminals.size <= MAX_TERMINALS) return;
+  const idle = [...terminals.values()]
+    .filter((e) => e.id !== selectedId)
+    .sort((a, b) => a.shownAt - b.shownAt);
+  for (const e of idle.slice(0, terminals.size - MAX_TERMINALS)) disposeTerminal(e.id);
+}
+
 function showTerminal(id) {
   for (const [tid, entry] of terminals) entry.pane.classList.toggle('active', tid === id);
   if (!id || !sessionById(id)) return;
   const entry = ensureTerminal(id);
+  entry.shownAt = Date.now();
+  trimTerminals();
   entry.pane.classList.add('active');
   fitTerminal(entry);
   entry.term.focus();
@@ -278,10 +292,10 @@ function renderEntry(s) {
   const children = [
     el('div', { class: 'top' },
       el('span', { class: `tag ${s.status}` }, STATUS_LABEL[s.status] ?? s.status),
-      el('span', { class: 'name' }, s.name)),
+      el('span', { class: 'name', title: s.name }, s.name)),
   ];
-  if (s.goal) children.push(el('div', { class: 'goal' }, s.goal));
-  children.push(el('div', { class: 'where' }, where(s)));
+  if (s.goal) children.push(el('div', { class: 'goal', title: s.goal }, s.goal));
+  children.push(el('div', { class: 'where', title: s.cwd }, where(s)));
   if (s.status === 'needs-you' && s.question) children.push(el('div', { class: 'question' }, s.question));
   if (s.status === 'ended') {
     const actions = el('div', { class: 'actions' });
@@ -291,14 +305,56 @@ function renderEntry(s) {
     actions.append(el('button', { type: 'button', class: 'secondary', onclick: (e) => { e.stopPropagation(); dismiss(s); } }, 'Dismiss'));
     children.push(actions);
   }
-  const li = el('li', { class: `entry ${s.status}${s.id === selectedId ? ' selected' : ''}`, 'data-id': s.id }, ...children);
+  const selected = s.id === selectedId;
+  const li = el('li', {
+    class: `entry ${s.status}${selected ? ' selected' : ''}`,
+    'data-id': s.id,
+    tabindex: '0',
+  }, ...children);
+  // Ended entries hold their own Resume and Dismiss buttons, which a
+  // role=button parent would hide from screen readers.
+  if (s.status !== 'ended') {
+    li.setAttribute('role', 'button');
+    li.setAttribute('aria-label', `${s.name}, ${STATUS_LABEL[s.status] ?? s.status}`);
+  }
+  if (selected) li.setAttribute('aria-current', 'true');
   li.style.borderLeftColor = s.color;
   li.addEventListener('click', () => select(s.id));
+  li.addEventListener('keydown', (e) => {
+    if (e.target !== li) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      select(s.id);
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      (e.key === 'ArrowDown' ? li.nextElementSibling : li.previousElementSibling)?.focus();
+    }
+  });
   return li;
 }
 
+// Rebuilds the list, keeping keyboard focus on the same entry or button.
 function renderList() {
+  const active = document.activeElement;
+  const focusedEntry = listEl.contains(active) ? active.closest('.entry')?.dataset.id : null;
+  const focusedLabel = focusedEntry && active.tagName === 'BUTTON' ? active.textContent : null;
   listEl.replaceChildren(...sessions.map(renderEntry));
+  if (!focusedEntry) return;
+  const li = listEl.querySelector(`.entry[data-id="${CSS.escape(focusedEntry)}"]`);
+  const button = focusedLabel && [...(li?.querySelectorAll('button') ?? [])].find((b) => b.textContent === focusedLabel);
+  (button ?? li)?.focus();
+}
+
+// Dark text on light repo colours, white on dark ones, so the header stays readable.
+function readableText(hex) {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex ?? '');
+  if (!m) return '#fff';
+  const [r, g, b] = [0, 2, 4].map((i) => {
+    const c = parseInt(m[1].slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  // Above about 0.18 luminance, dark text has the higher contrast ratio.
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.18 ? '#111' : '#fff';
 }
 
 // ---------- header ----------
@@ -311,6 +367,7 @@ function renderHeader() {
     return;
   }
   headerEl.style.background = s.color;
+  headerEl.classList.toggle('light', readableText(s.color) === '#111');
 
   const ident = el('div', { class: 'ident' },
     el('div', { class: 'title' }, s.name),
@@ -318,7 +375,7 @@ function renderHeader() {
 
   let goal;
   if (editingGoal) {
-    goal = el('input', { class: 'goal-input', value: s.goal ?? '', placeholder: 'Goal' });
+    goal = el('input', { class: 'goal-input', value: s.goal ?? '', placeholder: 'Goal', maxlength: '120', 'aria-label': 'Session goal' });
     goal.value = s.goal ?? '';
     let done = false;
     const finish = (save) => {
@@ -337,7 +394,7 @@ function renderHeader() {
     goal.addEventListener('blur', () => finish(true));
     queueMicrotask(() => goal.focus());
   } else {
-    goal = el('div', { class: `goal${s.goal ? '' : ' empty'}`, title: 'Click to edit the goal' }, s.goal || 'Set a goal');
+    goal = el('button', { type: 'button', class: `goal${s.goal ? '' : ' empty'}`, title: s.goal ? `${s.goal} (click to edit)` : 'Click to set a goal' }, s.goal || 'Set a goal');
     goal.addEventListener('click', () => {
       editingGoal = true;
       renderHeader();
@@ -351,8 +408,8 @@ function renderHeader() {
   } else if (confirmingStop) {
     controls.append(
       el('span', { class: 'confirm' }, `Stop ${s.name}?`),
-      el('button', { type: 'button', onclick: () => { confirmingStop = false; stop(s); } }, 'Yes'),
-      el('button', { type: 'button', onclick: () => { confirmingStop = false; renderHeader(); } }, 'No'));
+      el('button', { type: 'button', class: 'danger', onclick: () => { confirmingStop = false; stop(s); } }, 'Stop'),
+      el('button', { type: 'button', onclick: () => { confirmingStop = false; renderHeader(); } }, 'Cancel'));
   } else {
     controls.append(el('button', { type: 'button', onclick: () => { confirmingStop = true; renderHeader(); } }, 'Stop'));
   }
@@ -363,16 +420,12 @@ function renderHeader() {
 
 let toastTimer = null;
 function showToast(err) {
-  const entry = terminals.get(selectedId);
-  const text = err?.message ?? String(err);
-  if (entry) {
-    setNotice(entry, text);
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => setNotice(entry, ''), 5000);
-  } else {
-    emptyEl.textContent = text;
-  }
+  toastEl.textContent = err?.message ?? String(err);
+  toastEl.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toastEl.hidden = true; }, 6000);
 }
+toastEl.addEventListener('click', () => { toastEl.hidden = true; });
 
 const idPath = (s) => `/api/sessions/${encodeURIComponent(s.id)}`;
 const stop = (s) => api('POST', `${idPath(s)}/stop`).catch(showToast);
@@ -507,6 +560,7 @@ $('nf-cwd').addEventListener('input', onAgentOrFolderChange);
 
 $('new-btn').addEventListener('click', () => {
   form.hidden = !form.hidden;
+  $('new-btn').setAttribute('aria-expanded', String(!form.hidden));
   if (!form.hidden) {
     loadAgents();
     $('nf-name').focus();
@@ -518,24 +572,42 @@ function resetForm() {
   $('nf-agent-desc').hidden = true;
 }
 
-$('nf-cancel').addEventListener('click', () => {
+function closeForm() {
   resetForm();
   form.hidden = true;
   formError.hidden = true;
+  $('new-btn').setAttribute('aria-expanded', 'false');
+  $('new-btn').focus();
+}
+$('nf-cancel').addEventListener('click', closeForm);
+// The agent combobox stops Escape while its list is open, so this only closes the form.
+form.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeForm();
+});
+// Cmd/Ctrl+Enter starts the session from the first-prompt box.
+$('nf-brief').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+    e.preventDefault();
+    if (!$('nf-submit').disabled) form.requestSubmit();
+  }
 });
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
+  if ($('nf-submit').disabled) return;
   formError.hidden = true;
   $('nf-submit').disabled = true;
+  $('nf-submit').textContent = 'Starting…';
   try {
     const rec = await api('POST', '/api/sessions', {
       name: $('nf-name').value.trim(),
       cwd: $('nf-cwd').value.trim(),
       agent: $('nf-agent').value.trim(),
+      model: $('nf-model').value.trim(),
       brief: $('nf-brief').value,
     });
     resetForm();
     form.hidden = true;
+    $('new-btn').setAttribute('aria-expanded', 'false');
     if (rec?.id) {
       if (!sessionById(rec.id)) sessions = [...sessions, { ...rec, status: 'working', color: rec.color ?? '#3b82f6' }];
       select(rec.id);
@@ -545,6 +617,7 @@ form.addEventListener('submit', async (e) => {
     formError.hidden = false;
   } finally {
     $('nf-submit').disabled = false;
+    $('nf-submit').textContent = 'Start';
   }
 });
 

@@ -83,19 +83,19 @@ REST handlers in `src/server.js` implement:
 | `POST /api/locate` | Run Spotlight `mdfind -name`, then match file name, size, and modification time within two seconds; return the sole match, or null if absent or ambiguous |
 | `POST /api/upload?session=<id>` | Require a known session, accept a nonempty file up to 50 MB, sanitize its name, and save a private copy |
 
-For file drop or paste, the browser first tries locate, then uploads if no original is found. It sends the returned path, escaped for terminal input, over the terminal WebSocket. These endpoints do not themselves send the path to the pty. Uploads remain on disk until removed outside the app.
+For file drop or paste, the browser first tries locate, then uploads if no original is found. It sends the returned path, escaped for terminal input, over the terminal WebSocket. These endpoints do not themselves send the path to the pty. The server deletes uploads older than seven days at startup and every six hours.
 
 ## Request boundary
 
 HTTP requests and WebSocket upgrades must have a Host of `127.0.0.1:<bound-port>` or `localhost:<bound-port>`. If Origin is present, it must be the matching local HTTP origin on that port. An absent Origin is accepted for CLI clients.
 
-All routes, including static assets and both WebSocket upgrades, require the installation token through the `key` query parameter, `ad_key` cookie, or Bearer header, except `GET /api/health`. Health still requires the Host and Origin checks. An unauthenticated `GET /` returns a sign-in instruction page with status 401.
+All routes, including static assets and both WebSocket upgrades, require the installation token through the `key` query parameter, `ad_key` cookie, or Bearer header, except `GET /api/health`. Health still requires the Host and Origin checks. An unauthenticated `GET /` returns a sign-in instruction page with status 401. Every HTTP response carries a Content-Security-Policy (same-origin scripts and connections, no framing), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`. Static files carry an ETag and answer a matching `If-None-Match` with 304. The events socket sends a snapshot only when it differs from the last one sent.
 
 A valid query token on an HTTP request sets an HttpOnly, SameSite=Strict cookie. `GET /?key=...` redirects to `/` to remove the key from the URL. Token comparisons use `timingSafeEqual` after checking lengths. This is a single local installation token, not a per-user account system.
 
 ## Sessions and status
 
-`src/pty.js` loads `node-pty`, ensures packaged spawn helpers have an executable bit when possible, and returns its real spawn function. `SessionManager` receives that function and starts `claude` in the requested working directory with terminal environment variables. New sessions pass a name, optional agent, and brief; resume passes `--resume` with the stored Claude session ID.
+`src/pty.js` loads `node-pty`, ensures packaged spawn helpers have an executable bit when possible, and returns its real spawn function. `SessionManager` receives that function and starts `claude` in the requested working directory with terminal environment variables. New sessions pass a name, optional agent, optional model, and brief; agent and model values with whitespace or a leading dash are rejected, and an empty model leaves Claude Code on its default; resume passes `--resume` with the stored Claude session ID.
 
 Each live session owns a pty and `ScreenWatcher`. Output is appended to a bounded scrollback buffer, fed to the watcher, and forwarded to attached terminal listeners. The watcher detects prompts, bells, and notification escape sequences. User input clears its waiting signals; terminal reports alone do not count as user input.
 

@@ -409,3 +409,64 @@ test('POST /api/locate falls back to upload when matching originals are ambiguou
   assert.equal(res.status, 200);
   assert.deepEqual(res.json, { path: null });
 });
+
+test('pages and API responses carry the security headers', async () => {
+  const res = await request('/', { headers: auth });
+  const csp = res.headers['content-security-policy'];
+  assert.match(csp, /frame-ancestors 'none'/);
+  assert.match(csp, /script-src 'self'/);
+  assert.match(csp, new RegExp(`connect-src 'self' ws://127\\.0\\.0\\.1:${port}`));
+  assert.equal(res.headers['x-content-type-options'], 'nosniff');
+  assert.equal(res.headers['x-frame-options'], 'DENY');
+  assert.equal(res.headers['referrer-policy'], 'no-referrer');
+  assert.equal((await request('/api/sessions')).headers['x-frame-options'], 'DENY');
+});
+
+test('static files answer 304 to a matching ETag', async () => {
+  const first = await request('/static/app.js', { headers: auth });
+  assert.equal(first.status, 200);
+  assert.ok(first.headers.etag);
+  const again = await request('/static/app.js', { headers: { ...auth, 'if-none-match': first.headers.etag } });
+  assert.equal(again.status, 304);
+  assert.equal(again.text, '');
+});
+
+test('an upload whose Content-Length is over the limit is refused with a JSON 413 the client can read', async () => {
+  const created = await request('/api/sessions', { method: 'POST', headers: auth, body: { name: 'upload-declared-big', cwd: dir } });
+  const res = await new Promise((resolve, reject) => {
+    const req = http.request({
+      host: '127.0.0.1', port, method: 'POST', path: `/api/upload?session=${created.json.id}`,
+      headers: { host: `127.0.0.1:${port}`, ...auth, 'content-length': String(50 * 1024 * 1024 + 1) },
+    }, (r) => {
+      let text = '';
+      r.on('data', (d) => { text += d; });
+      r.on('end', () => resolve({ status: r.statusCode, json: JSON.parse(text) }));
+    });
+    req.on('error', reject);
+    req.end(Buffer.alloc(50 * 1024 * 1024 + 1));
+  });
+  assert.equal(res.status, 413);
+  assert.match(res.json.error, /too large/);
+});
+
+test('/ws/events does not resend an unchanged snapshot', async () => {
+  const ws = connect('/ws/events');
+  await nextMessage(ws);
+  const received = [];
+  ws.on('message', (d) => received.push(JSON.parse(d.toString())));
+  for (const cb of snapshotSubs) cb([{ id: 'dedupe-1' }]);
+  for (const cb of snapshotSubs) cb([{ id: 'dedupe-1' }]);
+  for (const cb of snapshotSubs) cb([{ id: 'dedupe-2' }]);
+  await new Promise((r) => setTimeout(r, 100));
+  assert.deepEqual(received.map((m) => m.sessions[0].id), ['dedupe-1', 'dedupe-2']);
+  ws.close();
+});
+
+test('POST /api/sessions rejects option-like agent and model values and over-long names', async () => {
+  const post = (body) => request('/api/sessions', { method: 'POST', headers: auth, body: { cwd: dir, ...body } });
+  assert.equal((await post({ name: 'opt-agent', agent: '--dangerously-skip-permissions' })).status, 400);
+  assert.equal((await post({ name: 'opt-model', model: '-x' })).status, 400);
+  assert.equal((await post({ name: 'opt-space', model: 'opus --foo' })).status, 400);
+  assert.equal((await post({ name: 'n'.repeat(81) })).status, 400);
+  assert.equal((await post({ name: 'bad\nname' })).status, 400);
+});

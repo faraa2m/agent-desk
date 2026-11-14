@@ -11,13 +11,13 @@
 <aside id="sidebar">
   <div id="list-header">
     <h1>Sessions</h1>
-    <span id="conn" class="conn" hidden>disconnected</span>
+    <span id="conn" class="conn" role="status" hidden>disconnected</span>
   </div>
-  <button id="new-btn" type="button">＋ New session</button>
+  <button id="new-btn" type="button" aria-expanded="false" aria-controls="new-form">＋ New session</button>
   <button id="tl-btn" type="button" class="secondary">▶ Start team-lead</button>
-  <form id="new-form" hidden autocomplete="off">
-    <label>Name <input id="nf-name" required></label>
-    <label>Folder <input id="nf-cwd" required placeholder="~/Documents/dev/my-repo"></label>
+  <form id="new-form" hidden autocomplete="off" aria-label="New session">
+    <label>Name <input id="nf-name" required maxlength="80" spellcheck="false"></label>
+    <label>Folder <input id="nf-cwd" required placeholder="~/Documents/dev/my-repo" spellcheck="false"></label>
     <div class="field">
       <label for="nf-agent">Agent (optional)</label>
       <div class="combo">
@@ -27,19 +27,31 @@
       </div>
     </div>
     <p id="nf-agent-desc" class="hint" hidden></p>
+    <label>Model (optional) <input id="nf-model" list="nf-model-list" placeholder="Default model" spellcheck="false" maxlength="100"></label>
+    <datalist id="nf-model-list">
+      <option value="opus">
+      <option value="sonnet">
+      <option value="haiku">
+      <option value="claude-fable-5-2">
+      <option value="claude-opus-5-5">
+      <option value="claude-sonnet-5-5">
+      <option value="claude-haiku-5-5">
+    </datalist>
+    <p class="hint">Leave empty to use Claude Code's default model.</p>
     <label>First prompt <textarea id="nf-brief" rows="4"></textarea></label>
     <div class="row">
       <button type="submit" id="nf-submit">Start</button>
       <button type="button" id="nf-cancel" class="secondary">Cancel</button>
     </div>
-    <p id="nf-error" class="form-error" hidden></p>
+    <p id="nf-error" class="form-error" role="alert" hidden></p>
   </form>
-  <ul id="list"></ul>
+  <ul id="list" aria-label="Sessions"></ul>
 </aside>
 <main id="main">
   <header id="session-header" hidden></header>
   <div id="panes"></div>
   <div id="empty">Select a session, or start a new one.</div>
+  <div id="toast" class="toast" role="alert" hidden></div>
 </main>
 <script src="/vendor/xterm.js"></script>
 <script src="/vendor/addon-fit.js"></script>

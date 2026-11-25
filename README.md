@@ -7,6 +7,18 @@ One browser tab to see, switch between, and answer your Claude Code sessions.
 
 Agent Desk runs locally, hosts sessions in pseudo-terminals, and streams them to a browser with xterm.js. Session records persist across server restarts; running processes do not survive a server restart.
 
+## Alternative: herdr
+
+[herdr](https://herdr.dev) ([GitHub](https://github.com/herdrdev/herdr)) does the same job without a browser: a terminal multiplexer and desktop app that hosts coding-agent sessions, shows each agent as working, blocked, done or idle, and keeps sessions running when its window closes. Unless you need the sessions in a browser tab, herdr is the more complete option.
+
+A saved Claude Code agent with a chosen model, the equivalent of `agent-desk launch --agent NAME --model MODEL`, runs in its own herdr workspace:
+
+```sh
+pane=$(herdr workspace create --cwd /absolute/path/to/repo --label review --no-focus | jq -r '.result.root_pane.pane_id')
+herdr agent start review --kind claude --pane "$pane" -- -n review --agent NAME --model MODEL
+herdr agent prompt "$pane" "Review the current changes"
+```
+
 ## Requirements
 
 - macOS (browser opening and login startup use macOS tools)
